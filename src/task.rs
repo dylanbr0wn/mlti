@@ -93,7 +93,7 @@ impl Task {
                 Some(format!(
                   "{}{}",
                   "Process failed to start, retrying in ".red(),
-                  get_relative_time_from_ms(self.restart_delay.clone())
+                  get_relative_time_from_ms(self.restart_delay)
                 )),
                 None,
               ))
@@ -188,6 +188,6 @@ impl Task {
 fn get_relative_time_from_ms(ms: i64) -> String {
   let dt = Local::now() + Duration::milliseconds(ms);
   let ht = HumanTime::from(dt);
-  let english = ht.to_text_en(Accuracy::Precise, Tense::Present);
-  english
+  
+  ht.to_text_en(Accuracy::Precise, Tense::Present)
 }

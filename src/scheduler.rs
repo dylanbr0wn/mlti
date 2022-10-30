@@ -49,13 +49,13 @@ impl Scheduler {
     *tasks_queued += 1;
   }
   pub async fn run(&self) -> JoinHandle<()> {
-    let max_processes = self.max_processes.clone();
+    let max_processes = self.max_processes;
     let rx = self.tasks_rx.clone();
     let running_processes = self.running_processes.clone();
     let kill_all_rx = self.kill_all_rx.clone();
     let shutdown_tx = self.shutdown_tx.clone();
-    let number_of_tasks = self.number_of_tasks.clone();
-    return tokio::spawn(async move {
+    let number_of_tasks = self.number_of_tasks;
+    tokio::spawn(async move {
       let mut completed_tasks = 0;
       let mut join_set = JoinSet::new();
 
@@ -75,7 +75,7 @@ impl Scheduler {
               *running_processes += 1;
               join_set.spawn(async move {
                 match task.start().await {
-                  Ok(code) => {}
+                  Ok(_code) => {}
                   Err(e) => {
                     println!("{}", e);
                   }
@@ -103,7 +103,7 @@ impl Scheduler {
         .send_async(Message::new(MessageType::Complete, None, None, None))
         .await
         .expect("Could not send message on channel.");
-    });
+    })
   }
   pub async fn shutdown(&mut self) {
     self

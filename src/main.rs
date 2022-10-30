@@ -1,4 +1,4 @@
-use ctrlc;
+
 use owo_colors::OwoColorize;
 use rand::Rng;
 
@@ -61,10 +61,7 @@ async fn main() -> Result<()> {
     let r = rng.gen_range(75..255);
     let g = rng.gen_range(75..255);
     let b = rng.gen_range(75..255);
-    let name = match arg_parser.names.get(i) {
-      Some(name) => Some(name.to_string()),
-      None => None,
-    };
+    let name = arg_parser.names.get(i).map(|name| name.to_string());
     if name.is_none() {
       unnamed_counter += 1;
     }

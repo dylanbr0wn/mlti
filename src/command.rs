@@ -53,7 +53,7 @@ pub fn parse(raw_cmd: &str) -> Result<String> {
 
 fn replace_prefix(prefix: String, key: String, value: String) -> String {
   if prefix == key {
-    return value;
+    value
   } else {
     let format_str = format!("{{{}}}", key);
     prefix.replace(&format_str, &value)
@@ -113,7 +113,7 @@ fn get_name(
     backup_name = &default_name;
   }
 
-  return backup_name.to_string();
+  backup_name.to_string()
 }
 
 fn truncate(s: &str, max_chars: usize) -> &str {
