@@ -33,8 +33,6 @@ async fn main() -> Result<()> {
   })
   .expect("Error setting Ctrl-C handler");
 
-  // let mut task_set = JoinSet::new();
-
   let arg_parser = arg_parser::ArgParser::new();
 
   if arg_parser.len() == 0 {
@@ -99,53 +97,50 @@ async fn main() -> Result<()> {
     let message = shutdown_rx.recv_async().await;
 
     match message {
-      Ok(message) => {
-        match message.type_ {
-          message::MessageType::Kill => {
-            println!();
-            println!("{}", "Killing all processes".red());
-            messenger_handle.abort();
-            scheduler.shutdown().await;
-            scheduler_handler.abort();
-            println!();
-            println!("{}", "Goodbye! 👋".bold().green());
+      Ok(message) => match message.type_ {
+        message::MessageType::Kill => {
+          println!();
+          println!("{}", "Killing all processes".red());
+          messenger_handle.abort();
+          scheduler.shutdown().await;
+          scheduler_handler.abort();
+          println!();
+          println!("{}", "Goodbye! 👋".bold().green());
 
-            std::process::exit(0);
-          }
-
-          message::MessageType::KillAll => {
-            println!(
-              "\n{}",
-              "Kill others flag present, stopping other processes.".red()
-            );
-            messenger_handle.abort();
-            scheduler.shutdown().await;
-            scheduler_handler.abort();
-            println!("\n{}", "All processes stopped. Goodbye! 👋".bold().green());
-            std::process::exit(0);
-          }
-          message::MessageType::KillAllOnError => {
-            println!(
-              "\n{}",
-              "Kill others on fail flag present, stopping other processes.".red()
-            );
-            messenger_handle.abort();
-            scheduler.shutdown().await;
-            scheduler_handler.abort();
-            println!("\n{}", "All processes stopped. Goodbye! 👋".bold().green());
-            std::process::exit(1);
-          }
-          message::MessageType::Complete => {
-            messenger_handle.abort();
-            // scheduler.shutdown().await;
-            scheduler_handler.abort();
-            println!("\n{}", "All done. Goodbye! 👋".bold().green());
-            // println!("\n{}", "All processes stopped. Goodbye! 👋".bold().green());
-            std::process::exit(0);
-          }
-          _ => {}
+          std::process::exit(0);
         }
-      }
+
+        message::MessageType::KillAll => {
+          println!(
+            "\n{}",
+            "Kill others flag present, stopping other processes.".red()
+          );
+          messenger_handle.abort();
+          scheduler.shutdown().await;
+          scheduler_handler.abort();
+          println!("\n{}", "All processes stopped. Goodbye! 👋".bold().green());
+          std::process::exit(0);
+        }
+        message::MessageType::KillAllOnError => {
+          println!(
+            "\n{}",
+            "Kill others on fail flag present, stopping other processes.".red()
+          );
+          messenger_handle.abort();
+          scheduler.shutdown().await;
+          scheduler_handler.abort();
+          println!("\n{}", "All processes stopped. Goodbye! 👋".bold().green());
+          std::process::exit(1);
+        }
+        message::MessageType::Complete => {
+          messenger_handle.abort();
+          scheduler.shutdown().await;
+          scheduler_handler.abort();
+          println!("\n{}", "All done. Goodbye! 👋".bold().green());
+          std::process::exit(0);
+        }
+        _ => {}
+      },
       Err(_) => {
         println!("{}", "Channel closed".red());
         break;
