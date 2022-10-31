@@ -56,7 +56,7 @@ jobs:
       - run: tar -C builds -czvf mlti-linux.tar.gz mlti-linux
       - uses: actions/upload-artifact@v3
         with:
-          name: mlti-macos
+          name: mlti-linux
           path: ./mlti-linux.tar.gz
   windows:
     name: build windows
@@ -77,8 +77,8 @@ jobs:
       - run: tar -C builds -czvf mlti-win64.tar.gz mlti-win64
       - uses: actions/upload-artifact@v3
         with:
-          name: mlti-macos
-          path: ./lti-win64.tar.gz
+          name: mlti-windows
+          path: ./mlti-win64.tar.gz
 
   macos:
     name: build macos
@@ -138,4 +138,4 @@ jobs:
         env:
           DEBUG: api
         run: |
-          gh release create $TAG_NAME $PRERELEASE --title "$TAG_NAME" --target $GITHUB_SHA ./mlti-macos.tar.gz ./mlti-linux.tar.gz ./mlti-win64.tar.gz
+          gh release create $TAG_NAME $PRERELEASE --title "$TAG_NAME" --target $GITHUB_SHA mlti-macos/* mlti-linux/*multi-win64/*
