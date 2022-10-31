@@ -20,8 +20,8 @@ Ultimately this is a project to help me learn threading in Rust but I do have lo
 
 - [ ] Feature Parity with concurrently
   - [ ] `--success` flag
-  - [ ] `--raw` flag
-  - [ ] `--no-color` flag
+  - [x] `--raw` flag
+  - [x] `--no-color` flag
   - [ ] `--hide` flag
   - [ ] `--group` flag
   - [ ] `--timings` flag
