@@ -45,10 +45,12 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          target: aarch64-unknown-linux-gnu
       - uses: actions-rs/cargo@v1
         with:
+          use-cross: true
           command: build
-          args: --release --all-features --target=x86_64-pc-windows-gnu
+          args: --release --all-features --target=aarch64-unknown-linux-gnu
       - run: mkdir -p builds/mlti-linux
       - run: cp target/aarch64-unknown-linux-gnu/release/mlti.exe builds/mlti-linux
       - run: tar -C builds -czvf mlti-linux.tar.gz mlti-linux
@@ -63,9 +65,11 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: x86_64-pc-windows-gnu
+          toolchain: stable
+          target: x86_64-pc-windows-gnu
       - uses: actions-rs/cargo@v1
           with:
+            use-cross: true
             command: build
             args: --release --all-features --target=x86_64-pc-windows-gnu
       - run: mkdir -p builds/mlti-win64
@@ -83,9 +87,11 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: aarch64-apple-darwin
+          toolchain: stable
+          target: aarch64-apple-darwin
       - uses: actions-rs/cargo@v1
         with:
+          use-cross: true
           command: build
           args: --release --all-features --target=aarch64-apple-darwin
       - run: mkdir -p builds/mlti-macos
