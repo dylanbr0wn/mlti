@@ -52,7 +52,7 @@ jobs:
           command: build
           args: --release --all-features --target=aarch64-unknown-linux-gnu
       - run: mkdir -p builds/mlti-linux
-      - run: cp target/aarch64-unknown-linux-gnu/release/mlti-linux.exe builds/mlti-linux
+      - run: cp target/aarch64-unknown-linux-gnu/release/mlti builds/mlti-linux
       - run: tar -C builds -czvf mlti-linux.tar.gz mlti-linux
       - uses: actions/upload-artifact@v3
         with:
@@ -95,7 +95,7 @@ jobs:
           command: build
           args: --release --all-features --target=aarch64-apple-darwin
       - run: mkdir -p builds/mlti-macos
-      - run: cp target/aarch64-apple-darwin/release/mlti.exe builds/mlti-macos
+      - run: cp target/aarch64-apple-darwin/release/mlti builds/mlti-macos
       - run: tar -C builds -czvf mlti-macos.tar.gz mlti-macos
       - uses: actions/upload-artifact@v3
         with:
