@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  schedule:
+    - cron: 0 0 * * *
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag name for release"
+        required: false
+        default: nightly
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tagname:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.tag.outputs.tag }}
+    steps:
+      - if: github.event_name == 'workflow_dispatch'
+        run: echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
+      - if: github.event_name == 'schedule'
+        run: echo 'TAG_NAME=nightly' >> $GITHUB_ENV
+      - if: github.event_name == 'push'
+        run: |
+          TAG_NAME=${{ github.ref }}
+          echo "TAG_NAME=${TAG_NAME#refs/tags/}" >> $GITHUB_ENV
+      - id: vars
+        shell: bash
+        run: echo "::set-output name=sha_short::${GITHUB_SHA::7}"
+      - if: env.TAG_NAME == 'nightly'
+        run: echo 'TAG_NAME=nightly-${{ steps.vars.outputs.sha_short }}' >> $GITHUB_ENV
+      - id: tag
+        run: echo "::set-output name=tag::$TAG_NAME"
+  linux:
+    name: build linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features --target=x86_64-pc-windows-gnu
+      - run: mkdir -p builds/mlti-linux
+      - run: cp target/aarch64-unknown-linux-gnu/release/mlti.exe builds/mlti-linux
+      - run: tar -C builds -czvf mlti-linux.tar.gz mlti-linux
+      - uses: actions/upload-artifact@v3
+        with:
+          name: mlti-macos
+          path: ./mlti-linux.tar.gz
+  windows:
+    name: build windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: x86_64-pc-windows-gnu
+      - uses: actions-rs/cargo@v1
+          with:
+            command: build
+            args: --release --all-features --target=x86_64-pc-windows-gnu
+      - run: mkdir -p builds/mlti-win64
+      - run: cp target/x86_64-pc-windows-gnu/release/mlti.exe builds/mlti-win64
+      - run: tar -C builds -czvf mlti-win64.tar.gz mlti-win64
+      - uses: actions/upload-artifact@v3
+        with:
+          name: mlti-macos
+          path: ./lti-win64.tar.gz
+
+  macos:
+    name: build macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: aarch64-apple-darwin
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features --target=aarch64-apple-darwin
+      - run: mkdir -p builds/mlti-macos
+      - run: cp target/aarch64-apple-darwin/release/mlti.exe builds/mlti-macos
+      - run: tar -C builds -czvf mlti-macos.tar.gz mlti-macos
+      - uses: actions/upload-artifact@v3
+          with:
+            name: mlti-macos
+            path: ./multi-macos.tar.gz
+  publish:
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: write
+    steps:
+      # Must perform checkout first, since it deletes the target directory
+      # before running, and would therefore delete the downloaded artifacts
+      - uses: actions/checkout@v3
+
+      - uses: actions/download-artifact@v3
+
+      - if: github.event_name == 'workflow_dispatch'
+        run: echo "TAG_NAME=${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
+      - if: github.event_name == 'schedule'
+        run: echo 'TAG_NAME=nightly' >> $GITHUB_ENV
+      - if: github.event_name == 'push'
+        run: |
+          TAG_NAME=${{ github.ref }}
+          echo "TAG_NAME=${TAG_NAME#refs/tags/}" >> $GITHUB_ENV
+      - if: env.TAG_NAME == 'nightly'
+        run: |
+          (echo 'SUBJECT=mlti development build';
+           echo 'PRERELEASE=--prerelease') >> $GITHUB_ENV
+          gh release delete nightly --yes || true
+          git push origin :nightly || true
+      - if: env.TAG_NAME != 'nightly'
+        run: |
+          (echo 'SUBJECT=mlti release build';
+           echo 'PRERELEASE=') >> $GITHUB_ENV
+      - name: Publish release
+        env:
+          DEBUG: api
+        run: |
+          gh release create $TAG_NAME $PRERELEASE --title "$TAG_NAME" --target $GITHUB_SHA ./mlti-macos.tar.gz ./mlti-linux.tar.gz ./mlti-win64.tar.gz
