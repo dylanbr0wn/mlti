@@ -68,10 +68,10 @@ jobs:
           toolchain: stable
           target: x86_64-pc-windows-gnu
       - uses: actions-rs/cargo@v1
-          with:
-            use-cross: true
-            command: build
-            args: --release --all-features --target=x86_64-pc-windows-gnu
+        with:
+          use-cross: true
+          command: build
+          args: --release --all-features --target=x86_64-pc-windows-gnu
       - run: mkdir -p builds/mlti-win64
       - run: cp target/x86_64-pc-windows-gnu/release/mlti.exe builds/mlti-win64
       - run: tar -C builds -czvf mlti-win64.tar.gz mlti-win64
@@ -98,9 +98,9 @@ jobs:
       - run: cp target/aarch64-apple-darwin/release/mlti.exe builds/mlti-macos
       - run: tar -C builds -czvf mlti-macos.tar.gz mlti-macos
       - uses: actions/upload-artifact@v3
-          with:
-            name: mlti-macos
-            path: ./multi-macos.tar.gz
+        with:
+          name: mlti-macos
+          path: ./multi-macos.tar.gz
   publish:
     needs: [linux, windows, macos]
     runs-on: ubuntu-latest
