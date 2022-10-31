@@ -1,3 +1,5 @@
+use std::i32::MAX;
+
 use clap::{arg, command, value_parser, ArgAction, ArgMatches};
 
 pub struct ArgParser {
@@ -10,6 +12,9 @@ pub struct ArgParser {
   pub restart_after: i64,
   pub prefix: Option<String>,
   pub prefix_length: i16,
+  pub max_processes: i32,
+  pub raw: bool,
+  pub no_color: bool,
 }
 
 impl ArgParser {
@@ -25,7 +30,7 @@ impl ArgParser {
                     .id("name-separator"),
             )
             .arg(
-                arg!(--"kill-others" "Kill other processes if one exits.")
+                arg!( -k --"kill-others" "Kill other processes if one exits.")
                     .id("kill-others")
                     .value_parser(value_parser!(bool)),
             )
@@ -53,6 +58,21 @@ impl ArgParser {
                     .id("prefix")
                     .value_parser(value_parser!(i16)),
             )
+            .arg(
+                arg!(-m --"max-processes" <pre> "How many process should run at once.")
+                    .id("max-processes")
+                    .value_parser(value_parser!(String)),
+            )
+            .arg(
+                arg!(-r --raw "Print raw output of process only.")
+                    .id("raw")
+                    .value_parser(value_parser!(bool)),
+            )
+            .arg(
+                arg!(--"no-color" "Disable color output.")
+                    .id("no-color")
+                    .value_parser(value_parser!(bool)),
+            )
             .arg(arg!([processes] "List of prcoess to run concurrently").action(ArgAction::Append))
             .get_matches();
 
@@ -78,6 +98,15 @@ impl ArgParser {
       .unwrap_or(&10)
       .to_owned();
 
+    let max_processes = matches
+      .get_one::<String>("max-processes")
+      .map(|x| x.to_owned());
+
+    let max_processes = parse_max_processes(max_processes);
+
+    let raw = matches.get_flag("raw");
+    let no_color = matches.get_flag("no-color");
+
     Self {
       matches,
       names,
@@ -88,6 +117,9 @@ impl ArgParser {
       restart_after,
       prefix,
       prefix_length,
+      max_processes,
+      raw,
+      no_color,
     }
   }
 
@@ -116,4 +148,21 @@ pub fn parse_processes(matches: ArgMatches) -> Vec<String> {
     .map(|v| v.to_owned())
     .collect::<Vec<_>>();
   processes
+}
+pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
+  let max_processes = match max_processes {
+    Some(max) => {
+      if max.contains('%') {
+        let percentage = str::parse::<i32>(&max.replace("%", ""))
+          .expect("Could not parse percentage");
+        let cpus = num_cpus::get();
+        let max_processes = (cpus as f32 * (percentage as f32 / 100.0)) as i32;
+        max_processes
+      } else {
+        str::parse::<i32>(&max).expect("Could not parse max processes")
+      }
+    }
+    None => MAX, // fuck it why not
+  };
+  max_processes
 }

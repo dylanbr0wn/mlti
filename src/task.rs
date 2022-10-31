@@ -9,11 +9,12 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
 use crate::command::Command;
-use crate::message::{Message, MessageType};
+use crate::message::{Message, MessageType, SenderType};
 
 pub(crate) struct Task {
   command: Command,
-  sender: Sender<Message>,
+  message_tx: Sender<Message>,
+  shutdown_tx: Sender<Message>,
   color: (u8, u8, u8),
   kill_others_on_fail: bool,
   kill_others: bool,
@@ -25,7 +26,8 @@ pub(crate) struct Task {
 impl Task {
   pub fn new(
     command: Command,
-    sender: Sender<Message>,
+    message_tx: Sender<Message>,
+    shutdown_tx: Sender<Message>,
     color: (u8, u8, u8),
     kill_others_on_fail: bool,
     kill_others: bool,
@@ -34,7 +36,8 @@ impl Task {
   ) -> Self {
     Self {
       command,
-      sender,
+      message_tx,
+      shutdown_tx,
       color,
       kill_others_on_fail,
       kill_others,
@@ -61,24 +64,26 @@ impl Task {
         }
         Err(e) => {
           self
-            .sender
+            .shutdown_tx
             .send_async(Message::new(
               MessageType::Error,
               Some(self.command.name.clone()),
               Some(format!("{}: {}", "Encountered an Error".red(), e.red())),
               None,
+              SenderType::Task,
             ))
             .await
             .expect("Could not send message on channel.");
           if restart_attemps <= 0 {
             if self.kill_others_on_fail {
               self
-                .sender
+                .shutdown_tx
                 .send_async(Message::new(
                   MessageType::KillAllOnError,
                   None,
                   None,
                   None,
+                  SenderType::Task,
                 ))
                 .await
                 .expect("Could not send message on channel.");
@@ -86,7 +91,7 @@ impl Task {
             break;
           } else {
             self
-              .sender
+              .message_tx
               .send_async(Message::new(
                 MessageType::Error,
                 Some(self.command.name.clone()),
@@ -96,6 +101,7 @@ impl Task {
                   get_relative_time_from_ms(self.restart_delay)
                 )),
                 None,
+                SenderType::Task,
               ))
               .await
               .expect("Could not send message on channel.");
@@ -113,7 +119,7 @@ impl Task {
       Some(c) => c,
       None => {
         self
-          .sender
+          .message_tx
           .send_async(Message::new(
             MessageType::Error,
             Some(self.command.name.clone()),
@@ -122,6 +128,7 @@ impl Task {
               "Encountered an Error: Could not start process.".red(),
             )),
             None,
+            SenderType::Task,
           ))
           .await
           .expect("Could not send message on channel.");
@@ -146,12 +153,13 @@ impl Task {
 
     while let Some(line) = reader.next_line().await.unwrap_or_default() {
       self
-        .sender
+        .message_tx
         .send_async(Message::new(
           MessageType::Text,
           Some(self.command.name.clone()),
           Some(line),
           Some(self.color),
+          SenderType::Process,
         ))
         .await
         .expect("Couldnt send message to main thread");
@@ -159,24 +167,26 @@ impl Task {
     let status = handle.await.unwrap();
     self.exit_code = Some(status.code().unwrap_or(-1));
     self
-      .sender
+      .message_tx
       .send_async(Message::new(
         MessageType::Text,
         Some(self.command.name.clone()),
-        Some(format!(
-          "{}",
-          "Done!"
-            .bold()
-            .truecolor(self.color.0, self.color.1, self.color.2)
-        )),
+        Some("Done!".into()),
         Some(self.color),
+        SenderType::Task,
       ))
       .await
       .expect("Couldnt send message to main thread");
     if self.kill_others {
       self
-        .sender
-        .send_async(Message::new(MessageType::KillAll, None, None, None))
+        .shutdown_tx
+        .send_async(Message::new(
+          MessageType::KillAll,
+          None,
+          None,
+          None,
+          SenderType::Task,
+        ))
         .await
         .expect("Could not send message on channel.");
     }
@@ -188,6 +198,6 @@ impl Task {
 fn get_relative_time_from_ms(ms: i64) -> String {
   let dt = Local::now() + Duration::milliseconds(ms);
   let ht = HumanTime::from(dt);
-  
+
   ht.to_text_en(Accuracy::Precise, Tense::Present)
 }

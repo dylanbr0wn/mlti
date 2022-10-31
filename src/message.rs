@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use owo_colors::OwoColorize;
+use owo_colors::Style;
 
 #[derive(Debug)]
 pub enum MessageType {
@@ -12,12 +12,21 @@ pub enum MessageType {
   Complete,
 }
 
+pub enum SenderType {
+  Process,
+  Scheduler,
+  Task,
+  Other,
+  Main,
+}
+
 pub struct Message {
   pub name: String,
   pub timestamp: u64,
   pub data: String,
-  color: (u8, u8, u8),
+  pub style: Style,
   pub type_: MessageType,
+  pub sender: SenderType,
 }
 
 impl Message {
@@ -26,7 +35,15 @@ impl Message {
     name: Option<String>,
     data: Option<String>,
     color: Option<(u8, u8, u8)>,
+    sender: SenderType,
   ) -> Self {
+    let color = match color {
+      Some(color) => color,
+      None => (255, 255, 255),
+    };
+
+    let style = Style::new().truecolor(color.0, color.1, color.2);
+
     Self {
       name: name.unwrap_or_default(),
       timestamp: SystemTime::now()
@@ -34,17 +51,9 @@ impl Message {
         .unwrap()
         .as_millis() as u64,
       data: data.unwrap_or_default(),
-      color: color.unwrap_or((255, 255, 255)),
+      style,
       type_,
+      sender,
     }
-  }
-  pub fn print_message(&self) {
-    println!(
-      "[{}]: {}",
-      self
-        .name
-        .truecolor(self.color.0, self.color.1, self.color.2),
-      self.data
-    );
   }
 }
