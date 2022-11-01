@@ -23,7 +23,7 @@ Ultimately this is a project to help me learn threading in Rust but I do have lo
   - [x] `--raw` flag
   - [x] `--no-color` flag
   - [ ] `--hide` flag
-  - [ ] `--group` flag
+  - [x] `--group` flag
   - [ ] `--timings` flag
   - [ ] `--passthrough-arguments` flag
   - [ ] `--prefix-colors` flag
