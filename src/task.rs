@@ -140,10 +140,10 @@ impl Task {
     let mut reader = BufReader::new(stdout).lines();
 
     let handle = tokio::spawn(async move {
-      return child
+      child
         .wait()
         .await
-        .expect("child process encountered an error");
+        .expect("child process encountered an error")
     });
 
     while let Some(line) = reader.next_line().await.unwrap_or_default() {
