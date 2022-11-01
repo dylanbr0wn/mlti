@@ -8,8 +8,15 @@ pub enum MessageType {
   Text,
   Error,
   KillAll,
+  KillOthers,
   KillAllOnError,
   Complete,
+}
+
+pub struct MessageSender {
+  pub index: Option<usize>,
+  pub name: String,
+  pub type_: SenderType,
 }
 
 pub enum SenderType {
@@ -26,7 +33,7 @@ pub struct Message {
   pub data: String,
   pub style: Style,
   pub type_: MessageType,
-  pub sender: SenderType,
+  pub sender: MessageSender,
 }
 
 impl Message {
@@ -35,7 +42,7 @@ impl Message {
     name: Option<String>,
     data: Option<String>,
     color: Option<(u8, u8, u8)>,
-    sender: SenderType,
+    sender: MessageSender,
   ) -> Self {
     let color = color.unwrap_or((255, 255, 255));
 
@@ -52,5 +59,23 @@ impl Message {
       type_,
       sender,
     }
+  }
+}
+
+pub fn build_message_sender (sender_type: SenderType, index: Option<usize>, name: Option<String>) -> MessageSender {
+
+  let name = name.unwrap_or_else(|| {
+    match sender_type {
+      SenderType::Process => "Process".to_string(),
+      SenderType::Scheduler => "Scheduler".to_string(),
+      SenderType::Task => "Task".to_string(),
+      SenderType::Other => "Other".to_string(),
+      SenderType::Main => "Main".to_string(),
+    }
+  });
+  MessageSender {
+    index,
+    name,
+    type_: sender_type,
   }
 }

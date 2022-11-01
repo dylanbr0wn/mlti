@@ -7,7 +7,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
 use crate::command::Process;
-use crate::message::{Message, MessageType, SenderType};
+use crate::message::{Message, MessageType, SenderType, build_message_sender};
 
 #[derive(Clone)]
 pub struct MltiConfig {
@@ -20,6 +20,7 @@ pub struct MltiConfig {
   pub max_processes: i32,
   pub raw: bool,
   pub no_color: bool,
+  pub group: bool,
 }
 
 pub(crate) struct Task {
@@ -66,7 +67,7 @@ impl Task {
               Some(self.process.name.clone()),
               Some(format!("{}: {}", "Encountered an Error".red(), e.red())),
               None,
-              SenderType::Task,
+              build_message_sender(SenderType::Task, None, None),
             ))
             .await
             .expect("Could not send message on channel.");
@@ -79,7 +80,7 @@ impl Task {
                   None,
                   None,
                   None,
-                  SenderType::Task,
+                  build_message_sender(SenderType::Task, None, None),
                 ))
                 .await
                 .expect("Could not send message on channel.");
@@ -97,7 +98,7 @@ impl Task {
                   get_relative_time_from_ms(self.mlti_config.restart_after)
                 )),
                 None,
-                SenderType::Task,
+                build_message_sender(SenderType::Task, None, None),
               ))
               .await
               .expect("Could not send message on channel.");
@@ -124,7 +125,7 @@ impl Task {
               "Encountered an Error: Could not start process.".red(),
             )),
             None,
-            SenderType::Task,
+            build_message_sender(SenderType::Task, None, None),
           ))
           .await
           .expect("Could not send message on channel.");
@@ -154,7 +155,7 @@ impl Task {
           Some(self.process.name.clone()),
           Some(line),
           Some(self.process.color),
-          SenderType::Process,
+          build_message_sender(SenderType::Process, Some(self.process.index.try_into().unwrap()), Some(self.process.name.clone())),
         ))
         .await
         .expect("Couldnt send message to main thread");
@@ -168,7 +169,7 @@ impl Task {
         Some(self.process.name.clone()),
         Some("Done!".into()),
         Some(self.process.color),
-        SenderType::Task,
+        build_message_sender(SenderType::Task, None, None),
       ))
       .await
       .expect("Couldnt send message to main thread");
@@ -176,11 +177,11 @@ impl Task {
       self
         .shutdown_tx
         .send_async(Message::new(
-          MessageType::KillAll,
+          MessageType::KillOthers,
           None,
           None,
           None,
-          SenderType::Task,
+          build_message_sender(SenderType::Task, None, None),
         ))
         .await
         .expect("Could not send message on channel.");

@@ -7,7 +7,7 @@ pub(crate) struct Process {
   pub name: String,
   pub args: Vec<String>,
   pub cmd: String,
-  index: usize,
+  pub index: usize,
   pub color: (u8, u8, u8),
 }
 

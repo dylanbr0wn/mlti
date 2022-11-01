@@ -1,6 +1,6 @@
 use command::Process;
-use message::{Message, MessageType};
-use owo_colors::{OwoColorize, Style};
+use message::{Message, MessageType, build_message_sender};
+use owo_colors::{ Style};
 use rand::Rng;
 
 use anyhow::Result;
@@ -24,11 +24,10 @@ async fn main() -> Result<()> {
 
   let mlti_config = arg_parser.get_mlti_config();
 
-  let shutdown_messenger =
-    messenger::Messenger::new(mlti_config.raw, mlti_config.no_color);
+  let mut shutdown_messenger =
+    messenger::Messenger::new(mlti_config.raw, mlti_config.no_color, arg_parser.len(), false);
   let shutdown_tx = shutdown_messenger.get_sender();
-  let shutdown_rx = shutdown_messenger.get_receiver();
-  let messenger = messenger::Messenger::new(mlti_config.raw, mlti_config.no_color);
+  let mut messenger = messenger::Messenger::new(mlti_config.raw, mlti_config.no_color, arg_parser.len(), mlti_config.group);
   let message_tx = messenger.get_sender();
 
   let messenger_handle = tokio::spawn(async move {
@@ -37,25 +36,30 @@ async fn main() -> Result<()> {
         |message: Message, raw: bool, no_color: bool| match message.type_ {
           MessageType::Error => {
             print_message(
-              message.sender,
+              message.sender.type_,
               message.name,
               message.data,
               message.style,
               raw,
               no_color,
             );
+            return 0
           }
           MessageType::Text => {
             print_message(
-              message.sender,
+              message.sender.type_,
               message.name,
               message.data,
               message.style,
               raw,
               no_color,
             );
+            return 0
           }
-          _ => {}
+          MessageType::Kill => {
+            return 1
+          }
+          _ => { return 0}
         },
       )
       .await;
@@ -65,11 +69,11 @@ async fn main() -> Result<()> {
   ctrlc::set_handler(move || {
     ctrlx_tx
       .send(message::Message::new(
-        message::MessageType::Kill,
+        message::MessageType::KillAll,
         None,
         None,
         None,
-        message::SenderType::Other,
+        build_message_sender(SenderType::Other, None, None),
       ))
       .expect("Could not send signal on channel.")
   })
@@ -145,7 +149,8 @@ async fn main() -> Result<()> {
   shutdown_messenger
     .listen(
       |message: Message, raw: bool, no_color: bool| match message.type_ {
-        MessageType::Kill => {
+
+        MessageType::KillAll => {
           print_message(
             SenderType::Main,
             "".into(),
@@ -154,24 +159,32 @@ async fn main() -> Result<()> {
             raw,
             no_color,
           );
-          messenger_handle.abort();
+          message_tx.send(message::Message::new(
+            message::MessageType::Kill,
+            None,
+            None,
+            None,
+            build_message_sender(SenderType::Main, None, None),
+          )).expect("Could not send kill signal on channel.");
+          // messenger_handle.abort();
           kill_all
             .send(())
             .expect("Could not send kill signal on channel.");
-          scheduler_handler.abort();
-          print_message(
-            SenderType::Main,
-            "".into(),
-            format!("\n{}", "Goodbye! 👋"),
-            bold_green_style,
-            raw,
-            no_color,
-          );
+          // scheduler_handler.abort();
+          // print_message(
+          //   SenderType::Main,
+          //   "".into(),
+          //   format!("\n{}", "Goodbye! 👋"),
+          //   bold_green_style,
+          //   raw,
+          //   no_color,
+          // );
 
-          std::process::exit(0);
+          // std::process::exit(0);
+          return 1
         }
 
-        MessageType::KillAll => {
+        MessageType::KillOthers => {
           print_message(
             SenderType::Main,
             "".into(),
@@ -183,20 +196,28 @@ async fn main() -> Result<()> {
             raw,
             no_color,
           );
-          messenger_handle.abort();
+          message_tx.send(message::Message::new(
+            message::MessageType::Kill,
+            None,
+            None,
+            None,
+            build_message_sender(SenderType::Main, None, None),
+          )).expect("Could not send kill signal on channel.");
+          // messenger_handle.abort();
           kill_all
             .send(())
             .expect("Could not send kill signal on channel.");
-          scheduler_handler.abort();
-          print_message(
-            SenderType::Main,
-            "".into(),
-            format!("\n{}", "All processes stopped. Goodbye! 👋"),
-            bold_green_style,
-            raw,
-            no_color,
-          );
-          std::process::exit(0);
+          // scheduler_handler.abort();
+          // print_message(
+          //   SenderType::Main,
+          //   "".into(),
+          //   format!("\n{}", "All processes stopped. Goodbye! 👋"),
+          //   bold_green_style,
+          //   raw,
+          //   no_color,
+          // );
+          // std::process::exit(0);
+          return 1
         }
         MessageType::KillAllOnError => {
           print_message(
@@ -210,103 +231,65 @@ async fn main() -> Result<()> {
             raw,
             no_color,
           );
-
-          messenger_handle.abort();
+          message_tx.send(message::Message::new(
+            message::MessageType::Kill,
+            None,
+            None,
+            None,
+            build_message_sender(SenderType::Main, None, None),
+          )).expect("Could not send kill signal on channel.");
+          // messenger_handle.abort();
           kill_all
             .send(())
             .expect("Could not send kill signal on channel.");
-          scheduler_handler.abort();
-          print_message(
-            SenderType::Main,
-            "".into(),
-            format!("\n{}", "All processes stopped. Goodbye! 👋"),
-            bold_green_style,
-            raw,
-            no_color,
-          );
-          std::process::exit(1);
+          // scheduler_handler.abort();
+          // print_message(
+          //   SenderType::Main,
+          //   "".into(),
+          //   format!("\n{}", "All processes stopped. Goodbye! 👋"),
+          //   bold_green_style,
+          //   raw,
+          //   no_color,
+          // );
+          // std::process::exit(1);
+          return 1
         }
         MessageType::Complete => {
-          messenger_handle.abort();
+          message_tx.send(message::Message::new(
+            message::MessageType::Kill,
+            None,
+            None,
+            None,
+            build_message_sender(SenderType::Main, None, None),
+          )).expect("Could not send kill signal on channel.");
+          // messenger_handle.abort();
           kill_all.send(()).ok();
-          scheduler_handler.abort();
-          print_message(
-            SenderType::Main,
-            "".into(),
-            format!("\n{}", "All done. Goodbye! 👋"),
-            bold_green_style,
-            raw,
-            no_color,
-          );
-          std::process::exit(0);
+
+          // scheduler_handler.abort();
+          // print_message(
+          //   SenderType::Main,
+          //   "".into(),
+          //   format!("\n{}", "All done. Goodbye! 👋"),
+          //   bold_green_style,
+          //   raw,
+          //   no_color,
+          // );
+          // std::process::exit(0);
+          return 1
         }
-        _ => {}
+        _ => { return 0}
       },
     )
     .await;
-
-  loop {
-    let message = shutdown_rx.recv_async().await;
-
-    match message {
-      Ok(message) => match message.type_ {
-        MessageType::Kill => {
-          println!();
-          println!("{}", "Killing all processes".red());
-          messenger_handle.abort();
-          kill_all
-            .send_async(())
-            .await
-            .expect("Could not send kill signal on channel.");
-          scheduler_handler.await.ok();
-          println!();
-          println!("{}", "Goodbye! 👋".bold().green());
-
-          std::process::exit(0);
-        }
-
-        MessageType::KillAll => {
-          println!(
-            "\n{}",
-            "Kill others flag present, stopping other processes.".red()
-          );
-          messenger_handle.abort();
-          kill_all
-            .send_async(())
-            .await
-            .expect("Could not send kill signal on channel.");
-          scheduler_handler.await.ok();
-          println!("\n{}", "All processes stopped. Goodbye! 👋".bold().green());
-          std::process::exit(0);
-        }
-        MessageType::KillAllOnError => {
-          println!(
-            "\n{}",
-            "Kill others on fail flag present, stopping other processes.".red()
-          );
-          messenger_handle.abort();
-          kill_all
-            .send_async(())
-            .await
-            .expect("Could not send kill signal on channel.");
-          scheduler_handler.await.ok();
-          println!("\n{}", "All processes stopped. Goodbye! 👋".bold().green());
-          std::process::exit(1);
-        }
-        MessageType::Complete => {
-          messenger_handle.abort();
-          kill_all.send_async(()).await.ok();
-          scheduler_handler.await.ok();
-          println!("\n{}", "All done. Goodbye! 👋".bold().green());
-          std::process::exit(0);
-        }
-        _ => {}
-      },
-      Err(_) => {
-        println!("{}", "Channel closed".red());
-        break;
-      }
-    }
-  }
+    messenger_handle.await.ok();
+    scheduler_handler.await.ok();
+    print_message(
+      SenderType::Main,
+      "".into(),
+      format!("\n{}", "Goodbye! 👋"),
+      bold_green_style,
+      mlti_config.raw,
+      mlti_config.no_color,
+    );
   Ok(())
 }

@@ -68,6 +68,11 @@ impl CommandParser {
                     .id("no-color")
                     .value_parser(value_parser!(bool)),
             )
+            .arg(
+              arg!(-g --group "Group outputs together as if processes where run sequentially.")
+                  .id("group")
+                  .value_parser(value_parser!(bool)),
+          )
             .arg(arg!([processes] "List of prcoess to run concurrently").action(ArgAction::Append))
             .get_matches();
 
@@ -102,11 +107,14 @@ impl CommandParser {
     let raw = matches.get_flag("raw");
     let no_color = matches.get_flag("no-color");
 
+    let group = matches.get_flag("group");
+
     Self {
       matches,
       names,
       processes,
       mlti_config: MltiConfig {
+        group,
         kill_others,
         kill_others_on_fail,
         restart_tries,
