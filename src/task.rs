@@ -8,6 +8,7 @@ use owo_colors::OwoColorize;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
+use crate::arg_parser::CommandArgs;
 use crate::command::Command;
 use crate::message::{Message, MessageType, SenderType};
 
@@ -16,10 +17,7 @@ pub(crate) struct Task {
   message_tx: Sender<Message>,
   shutdown_tx: Sender<Message>,
   color: (u8, u8, u8),
-  kill_others_on_fail: bool,
-  kill_others: bool,
-  restart_attemps: i64,
-  restart_delay: i64,
+ command_args: CommandArgs,
   exit_code: Option<i32>,
 }
 
@@ -29,20 +27,15 @@ impl Task {
     message_tx: Sender<Message>,
     shutdown_tx: Sender<Message>,
     color: (u8, u8, u8),
-    kill_others_on_fail: bool,
-    kill_others: bool,
-    restart_attemps: i64,
-    restart_delay: i64,
+    command_args: CommandArgs,
+
   ) -> Self {
     Self {
       command,
       message_tx,
       shutdown_tx,
       color,
-      kill_others_on_fail,
-      kill_others,
-      restart_attemps,
-      restart_delay,
+      command_args,
       exit_code: None,
     }
   }
@@ -53,7 +46,7 @@ impl Task {
 
     let mut child: Option<Child> = None;
 
-    let mut restart_attemps = self.restart_attemps - 1;
+    let mut restart_attemps = self.command_args.restart_after - 1;
 
     loop {
       let attempt_child = cmd.args(self.command.args.clone()).spawn();
@@ -75,7 +68,7 @@ impl Task {
             .await
             .expect("Could not send message on channel.");
           if restart_attemps <= 0 {
-            if self.kill_others_on_fail {
+            if self.command_args.kill_others_on_fail {
               self
                 .shutdown_tx
                 .send_async(Message::new(
@@ -98,7 +91,7 @@ impl Task {
                 Some(format!(
                   "{}{}",
                   "Process failed to start, retrying in ".red(),
-                  get_relative_time_from_ms(self.restart_delay)
+                  get_relative_time_from_ms(self.command_args.restart_after)
                 )),
                 None,
                 SenderType::Task,
@@ -107,7 +100,7 @@ impl Task {
               .expect("Could not send message on channel.");
             restart_attemps -= 1;
             tokio::time::sleep(std::time::Duration::from_millis(
-              self.restart_delay as u64,
+              self.command_args.restart_after as u64,
             ))
             .await;
           }
@@ -177,7 +170,7 @@ impl Task {
       ))
       .await
       .expect("Couldnt send message to main thread");
-    if self.kill_others {
+    if self.command_args.kill_others {
       self
         .shutdown_tx
         .send_async(Message::new(

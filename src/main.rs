@@ -18,12 +18,15 @@ async fn main() -> Result<()> {
   let red_style = Style::new().red();
   let bold_green_style = Style::new().bold().green();
 
-  let arg_parser = arg_parser::ArgParser::new();
+  let arg_parser = arg_parser::CommandParser::new();
+
+  let command_args = arg_parser.get_command_args();
+
   let shutdown_messenger =
-    messenger::Messenger::new(arg_parser.raw, arg_parser.no_color);
+    messenger::Messenger::new(command_args.raw, command_args.no_color);
   let shutdown_tx = shutdown_messenger.get_sender();
   let shutdown_rx = shutdown_messenger.get_receiver();
-  let messenger = messenger::Messenger::new(arg_parser.raw, arg_parser.no_color);
+  let messenger = messenger::Messenger::new(command_args.raw, command_args.no_color);
   let message_tx = messenger.get_sender();
 
   let messenger_handle = tokio::spawn(async move {
@@ -76,8 +79,8 @@ async fn main() -> Result<()> {
       "".into(),
       "No processes to run. Goodbye! 👋".into(),
       bold_green_style,
-      arg_parser.raw,
-      arg_parser.no_color,
+      command_args.raw,
+      command_args.no_color,
     );
     messenger_handle.abort();
     return Ok(());
@@ -88,13 +91,13 @@ async fn main() -> Result<()> {
     "".into(),
     format!("\n{} {}\n", arg_parser.len(), "processes to run ✅"),
     bold_green_style,
-    arg_parser.raw,
-    arg_parser.no_color,
+    command_args.raw,
+    command_args.no_color,
   );
 
   let scheduler = scheduler::Scheduler::new(
     shutdown_tx.clone(),
-    arg_parser.max_processes,
+    command_args.max_processes,
     arg_parser.len() as i32,
   );
 
@@ -125,8 +128,8 @@ async fn main() -> Result<()> {
       raw_cmd.to_string(),
       name,
       unnamed_counter as i32,
-      arg_parser.prefix.clone(),
-      arg_parser.prefix_length,
+      command_args.prefix.clone(),
+      command_args.prefix_length,
     );
 
     task_queue
@@ -135,10 +138,7 @@ async fn main() -> Result<()> {
         message_tx.clone(),
         shutdown_tx.clone(),
         (r, g, b),
-        arg_parser.kill_others_on_fail,
-        arg_parser.kill_others,
-        arg_parser.restart_tries,
-        arg_parser.restart_after,
+        command_args.to_owned(),
       ))
       .await
       .expect("Could not send task on channel.");

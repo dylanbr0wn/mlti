@@ -2,10 +2,8 @@ use std::i32::MAX;
 
 use clap::{arg, command, value_parser, ArgAction, ArgMatches};
 
-pub struct ArgParser {
-  pub matches: ArgMatches,
-  pub names: Vec<String>,
-  pub processes: Vec<String>,
+#[derive(Clone)]
+pub struct CommandArgs {
   pub kill_others: bool,
   pub kill_others_on_fail: bool,
   pub restart_tries: i64,
@@ -17,7 +15,14 @@ pub struct ArgParser {
   pub no_color: bool,
 }
 
-impl ArgParser {
+pub struct CommandParser {
+  pub matches: ArgMatches,
+  pub names: Vec<String>,
+  pub processes: Vec<String>,
+  pub command_args: CommandArgs,
+}
+
+impl CommandParser {
   pub fn new() -> Self {
     let matches = command!() // requires `cargo` feature
             .arg(
@@ -111,20 +116,25 @@ impl ArgParser {
       matches,
       names,
       processes,
-      kill_others,
-      kill_others_on_fail,
-      restart_tries,
-      restart_after,
-      prefix,
-      prefix_length,
-      max_processes,
-      raw,
-      no_color,
+      command_args: CommandArgs {
+        kill_others,
+        kill_others_on_fail,
+        restart_tries,
+        restart_after,
+        prefix,
+        prefix_length,
+        max_processes,
+        raw,
+        no_color,
+      },
     }
   }
 
   pub fn len(&self) -> usize {
     self.processes.len()
+  }
+  pub fn get_command_args(&self) -> CommandArgs {
+    self.command_args.clone()
   }
 }
 
@@ -150,14 +160,14 @@ pub fn parse_processes(matches: ArgMatches) -> Vec<String> {
   processes
 }
 pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
-  
+
   match max_processes {
     Some(max) => {
       if max.contains('%') {
         let percentage = str::parse::<i32>(&max.replace('%', ""))
           .expect("Could not parse percentage");
         let cpus = num_cpus::get();
-        
+
         (cpus as f32 * (percentage as f32 / 100.0)) as i32
       } else {
         str::parse::<i32>(&max).expect("Could not parse max processes")
