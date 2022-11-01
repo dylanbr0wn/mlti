@@ -7,7 +7,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
 use crate::command::Process;
-use crate::message::{Message, MessageType, SenderType, build_message_sender};
+use crate::message::{build_message_sender, Message, MessageType, SenderType};
 
 #[derive(Clone)]
 pub struct MltiConfig {
@@ -47,7 +47,6 @@ impl Task {
     }
   }
   pub async fn start(&mut self) -> Result<i32> {
-
     let mut child: Option<Child> = None;
 
     let mut restart_attemps = self.mlti_config.restart_after - 1;
@@ -155,7 +154,11 @@ impl Task {
           Some(self.process.name.clone()),
           Some(line),
           Some(self.process.color),
-          build_message_sender(SenderType::Process, Some(self.process.index), Some(self.process.name.clone())),
+          build_message_sender(
+            SenderType::Process,
+            Some(self.process.index),
+            Some(self.process.name.clone()),
+          ),
         ))
         .await
         .expect("Couldnt send message to main thread");

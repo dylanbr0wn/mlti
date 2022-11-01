@@ -4,7 +4,6 @@ use clap::{arg, command, value_parser, ArgAction, ArgMatches};
 
 use crate::task::MltiConfig;
 
-
 pub struct CommandParser {
   pub matches: ArgMatches,
   pub names: Vec<String>,
@@ -158,7 +157,6 @@ pub fn parse_processes(matches: ArgMatches) -> Vec<String> {
   processes
 }
 pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
-
   match max_processes {
     Some(max) => {
       if max.contains('%') {

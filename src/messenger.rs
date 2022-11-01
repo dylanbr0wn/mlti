@@ -2,7 +2,7 @@ use flume::{Receiver, Sender};
 use owo_colors::{OwoColorize, Style};
 use std::collections::VecDeque;
 
-use crate::message::{Message, SenderType, MessageType};
+use crate::message::{Message, MessageType, SenderType};
 
 pub struct Messenger {
   sender: Sender<Message>,
@@ -14,7 +14,7 @@ pub struct Messenger {
 }
 
 impl Messenger {
-  pub fn new(raw: bool, no_color: bool, num_commands: usize, group:bool) -> Self {
+  pub fn new(raw: bool, no_color: bool, num_commands: usize, group: bool) -> Self {
     let (sender, receiver) = flume::unbounded::<Message>();
 
     let message_queues = (0..num_commands)
@@ -40,41 +40,45 @@ impl Messenger {
     loop {
       let message = self.receiver.recv_async().await.ok();
 
-        if let Some(message) = message {
-          if self.group {
-            match message.type_ {
-              MessageType::Kill => {
-                while let Ok(m) = self.receiver.try_recv() {
-                  if let Some(i) = m.sender.index {
-                    self.message_queue[i].push_back(m);
-                  }
-                }
-               self.flush();
-               break;
-              }
-              _ => {
-                if let Some(i) = message.sender.index {
-                  self.message_queue[i].push_back(message);
+      if let Some(message) = message {
+        if self.group {
+          match message.type_ {
+            MessageType::Kill => {
+              while let Ok(m) = self.receiver.try_recv() {
+                if let Some(i) = m.sender.index {
+                  self.message_queue[i].push_back(m);
                 }
               }
-            }
-
-          } else {
-            let val = handler(message, self.raw, self.no_color);
-            if val == 1 {
+              self.flush();
               break;
             }
+            _ => {
+              if let Some(i) = message.sender.index {
+                self.message_queue[i].push_back(message);
+              }
+            }
           }
-          // handler(message, self.raw, self.no_color);
+        } else {
+          let val = handler(message, self.raw, self.no_color);
+          if val == 1 {
+            break;
+          }
         }
-
-
+        // handler(message, self.raw, self.no_color);
+      }
     }
   }
   pub fn flush(&mut self) {
     for queue in self.message_queue.iter_mut() {
       while let Some(message) = queue.pop_front() {
-        print_message(message.sender.type_, message.name, message.data, message.style, self.raw, self.no_color);
+        print_message(
+          message.sender.type_,
+          message.name,
+          message.data,
+          message.style,
+          self.raw,
+          self.no_color,
+        );
       }
     }
   }
@@ -99,7 +103,6 @@ pub fn print_message(
         message = print_color(data, style, no_color);
       }
       SenderType::Task => {
-
         message = format!(
           "[{}]: {}",
           print_color(name, style, no_color),
@@ -121,4 +124,3 @@ pub fn print_color(text: String, style: Style, no_color: bool) -> String {
     return format!("{}", text.style(style));
   }
 }
-

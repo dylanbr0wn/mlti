@@ -4,7 +4,7 @@ use flume::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 
-use crate::message::{MessageType, SenderType, build_message_sender};
+use crate::message::{build_message_sender, MessageType, SenderType};
 use crate::{message::Message, task::Task};
 
 pub(crate) struct Scheduler {
@@ -101,5 +101,4 @@ impl Scheduler {
       .await
       .expect("Could not send message on channel.");
   }
-
 }

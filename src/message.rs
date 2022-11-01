@@ -62,16 +62,17 @@ impl Message {
   }
 }
 
-pub fn build_message_sender (sender_type: SenderType, index: Option<usize>, name: Option<String>) -> MessageSender {
-
-  let name = name.unwrap_or_else(|| {
-    match sender_type {
-      SenderType::Process => "Process".to_string(),
-      SenderType::Scheduler => "Scheduler".to_string(),
-      SenderType::Task => "Task".to_string(),
-      SenderType::Other => "Other".to_string(),
-      SenderType::Main => "Main".to_string(),
-    }
+pub fn build_message_sender(
+  sender_type: SenderType,
+  index: Option<usize>,
+  name: Option<String>,
+) -> MessageSender {
+  let name = name.unwrap_or_else(|| match sender_type {
+    SenderType::Process => "Process".to_string(),
+    SenderType::Scheduler => "Scheduler".to_string(),
+    SenderType::Task => "Task".to_string(),
+    SenderType::Other => "Other".to_string(),
+    SenderType::Main => "Main".to_string(),
   });
   MessageSender {
     index,
