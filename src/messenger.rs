@@ -49,12 +49,8 @@ pub fn print_message(
   no_color: bool,
 ) {
   if raw {
-    match sender_type {
-      SenderType::Process => {
-        println!("{}", data);
-      }
-
-      _ => {}
+    if let SenderType::Process = sender_type {
+      println!("{}", data);
     }
   } else {
     match sender_type {
