@@ -44,7 +44,7 @@ impl Messenger {
           if self.group {
             match message.type_ {
               MessageType::Kill => {
-                while let Some(m) = self.receiver.try_recv().ok() {
+                while let Ok(m) = self.receiver.try_recv() {
                   if let Some(i) = m.sender.index {
                     self.message_queue[i].push_back(m);
                   }
@@ -91,12 +91,12 @@ pub fn print_message(
   let mut message = String::new();
   if raw {
     if let SenderType::Process = sender_type {
-      message = format!("{}", data);
+      message = data;
     }
   } else {
     match sender_type {
       SenderType::Main => {
-        message = format!("{}", print_color(data, style, no_color));
+        message = print_color(data, style, no_color);
       }
       SenderType::Task => {
 

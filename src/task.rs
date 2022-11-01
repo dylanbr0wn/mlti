@@ -155,7 +155,7 @@ impl Task {
           Some(self.process.name.clone()),
           Some(line),
           Some(self.process.color),
-          build_message_sender(SenderType::Process, Some(self.process.index.try_into().unwrap()), Some(self.process.name.clone())),
+          build_message_sender(SenderType::Process, Some(self.process.index), Some(self.process.name.clone())),
         ))
         .await
         .expect("Couldnt send message to main thread");

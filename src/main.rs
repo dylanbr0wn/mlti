@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
               raw,
               no_color,
             );
-            return 0
+            0
           }
           MessageType::Text => {
             print_message(
@@ -54,12 +54,12 @@ async fn main() -> Result<()> {
               raw,
               no_color,
             );
-            return 0
+            0
           }
           MessageType::Kill => {
-            return 1
+            1
           }
-          _ => { return 0}
+          _ => { 0}
         },
       )
       .await;
@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
     let my_cmd = Process::new(
       arg_parser.processes[i].clone(),
       name,
-      i.try_into().unwrap(),
+      i,
       mlti_config.prefix.clone(),
       mlti_config.prefix_length,
       (r, g, b),
@@ -181,7 +181,7 @@ async fn main() -> Result<()> {
           // );
 
           // std::process::exit(0);
-          return 1
+          1
         }
 
         MessageType::KillOthers => {
@@ -217,7 +217,7 @@ async fn main() -> Result<()> {
           //   no_color,
           // );
           // std::process::exit(0);
-          return 1
+          1
         }
         MessageType::KillAllOnError => {
           print_message(
@@ -252,7 +252,7 @@ async fn main() -> Result<()> {
           //   no_color,
           // );
           // std::process::exit(1);
-          return 1
+          1
         }
         MessageType::Complete => {
           message_tx.send(message::Message::new(
@@ -275,9 +275,9 @@ async fn main() -> Result<()> {
           //   no_color,
           // );
           // std::process::exit(0);
-          return 1
+          1
         }
-        _ => { return 0}
+        _ => { 0}
       },
     )
     .await;
