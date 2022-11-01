@@ -100,7 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: mlti-macos
-          path: ./multi-macos.tar.gz
+          path: ./mlti-macos.tar.gz
   publish:
     needs: [linux, windows, macos]
     runs-on: ubuntu-latest
