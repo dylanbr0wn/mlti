@@ -77,7 +77,7 @@ pub fn print_message(
 
 pub fn print_color(text: String, style: Style, no_color: bool) -> String {
   if no_color {
-    return format!("{}", text);
+    text
   } else {
     return format!("{}", text.style(style));
   }

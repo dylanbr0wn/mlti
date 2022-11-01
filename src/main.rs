@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
 
   let scheduler = scheduler::Scheduler::new(
     shutdown_tx.clone(),
-    arg_parser.max_processes.clone(),
+    arg_parser.max_processes,
     arg_parser.len() as i32,
   );
 

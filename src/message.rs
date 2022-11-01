@@ -37,10 +37,7 @@ impl Message {
     color: Option<(u8, u8, u8)>,
     sender: SenderType,
   ) -> Self {
-    let color = match color {
-      Some(color) => color,
-      None => (255, 255, 255),
-    };
+    let color = color.unwrap_or((255, 255, 255));
 
     let style = Style::new().truecolor(color.0, color.1, color.2);
 

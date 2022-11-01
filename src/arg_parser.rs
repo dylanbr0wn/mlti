@@ -150,19 +150,19 @@ pub fn parse_processes(matches: ArgMatches) -> Vec<String> {
   processes
 }
 pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
-  let max_processes = match max_processes {
+  
+  match max_processes {
     Some(max) => {
       if max.contains('%') {
-        let percentage = str::parse::<i32>(&max.replace("%", ""))
+        let percentage = str::parse::<i32>(&max.replace('%', ""))
           .expect("Could not parse percentage");
         let cpus = num_cpus::get();
-        let max_processes = (cpus as f32 * (percentage as f32 / 100.0)) as i32;
-        max_processes
+        
+        (cpus as f32 * (percentage as f32 / 100.0)) as i32
       } else {
         str::parse::<i32>(&max).expect("Could not parse max processes")
       }
     }
     None => MAX, // fuck it why not
-  };
-  max_processes
+  }
 }
