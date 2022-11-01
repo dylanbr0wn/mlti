@@ -77,7 +77,7 @@ jobs:
       - run: tar -C builds -czvf mlti-win64.tar.gz mlti-win64
       - uses: actions/upload-artifact@v3
         with:
-          name: mlti-windows
+          name: mlti-win64
           path: ./mlti-win64.tar.gz
 
   macos:
