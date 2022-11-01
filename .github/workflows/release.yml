@@ -134,6 +134,8 @@ jobs:
         run: |
           (echo 'SUBJECT=mlti release build';
            echo 'PRERELEASE=') >> $GITHUB_ENV
+      - name: debug
+        run: ls
       - name: Publish release
         env:
           DEBUG: api
