@@ -1,8 +1,10 @@
+use command::Process;
 use message::{Message, MessageType};
 use owo_colors::{OwoColorize, Style};
 use rand::Rng;
 
 use anyhow::Result;
+use task::Task;
 
 use crate::{message::SenderType, messenger::print_message};
 
@@ -20,13 +22,13 @@ async fn main() -> Result<()> {
 
   let arg_parser = arg_parser::CommandParser::new();
 
-  let command_args = arg_parser.get_command_args();
+  let mlti_config = arg_parser.get_mlti_config();
 
   let shutdown_messenger =
-    messenger::Messenger::new(command_args.raw, command_args.no_color);
+    messenger::Messenger::new(mlti_config.raw, mlti_config.no_color);
   let shutdown_tx = shutdown_messenger.get_sender();
   let shutdown_rx = shutdown_messenger.get_receiver();
-  let messenger = messenger::Messenger::new(command_args.raw, command_args.no_color);
+  let messenger = messenger::Messenger::new(mlti_config.raw, mlti_config.no_color);
   let message_tx = messenger.get_sender();
 
   let messenger_handle = tokio::spawn(async move {
@@ -79,8 +81,8 @@ async fn main() -> Result<()> {
       "".into(),
       "No processes to run. Goodbye! 👋".into(),
       bold_green_style,
-      command_args.raw,
-      command_args.no_color,
+      mlti_config.raw,
+      mlti_config.no_color,
     );
     messenger_handle.abort();
     return Ok(());
@@ -91,17 +93,17 @@ async fn main() -> Result<()> {
     "".into(),
     format!("\n{} {}\n", arg_parser.len(), "processes to run ✅"),
     bold_green_style,
-    command_args.raw,
-    command_args.no_color,
+    mlti_config.raw,
+    mlti_config.no_color,
   );
 
   let scheduler = scheduler::Scheduler::new(
     shutdown_tx.clone(),
-    command_args.max_processes,
+    mlti_config.max_processes,
     arg_parser.len() as i32,
   );
 
-  let mut unnamed_counter = -1;
+  // let mut unnamed_counter = -1;
 
   let mut rng = rand::thread_rng();
 
@@ -118,27 +120,23 @@ async fn main() -> Result<()> {
     let g = rng.gen_range(75..255);
     let b = rng.gen_range(75..255);
     let name = arg_parser.names.get(i).map(|name| name.to_string());
-    if name.is_none() {
-      unnamed_counter += 1;
-    }
 
-    let raw_cmd = arg_parser.processes[i].clone();
-
-    let my_cmd = command::Command::new(
-      raw_cmd.to_string(),
+    let my_cmd = Process::new(
+      arg_parser.processes[i].clone(),
       name,
-      unnamed_counter as i32,
-      command_args.prefix.clone(),
-      command_args.prefix_length,
+      i.try_into().unwrap(),
+      mlti_config.prefix.clone(),
+      mlti_config.prefix_length,
+      (r, g, b),
     );
 
     task_queue
-      .send_async(task::Task::new(
+      .send_async(Task::new(
         my_cmd,
         message_tx.clone(),
         shutdown_tx.clone(),
-        (r, g, b),
-        command_args.to_owned(),
+        mlti_config.to_owned(),
+
       ))
       .await
       .expect("Could not send task on channel.");

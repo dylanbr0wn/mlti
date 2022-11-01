@@ -1,20 +1,24 @@
-use std::process;
+use std::process::{self, Stdio};
 
 use anyhow::Result;
+use tokio::process::Child;
 
-pub(crate) struct Command {
+pub(crate) struct Process {
   pub name: String,
   pub args: Vec<String>,
-  pub cmd_string: String,
+  pub cmd: String,
+  index: usize,
+  pub color: (u8, u8, u8),
 }
 
-impl Command {
+impl Process {
   pub fn new(
     raw_cmd: String,
     name: Option<String>,
-    index: i32,
+    index: usize,
     prefix: Option<String>,
     length: i16,
+    color: (u8, u8, u8),
   ) -> Self {
     let parsed_cmd = parse(&raw_cmd).unwrap();
 
@@ -27,10 +31,19 @@ impl Command {
     let name = get_name(&raw_cmd, name, index, prefix, length);
 
     Self {
+      color,
+      index,
       name,
       args,
-      cmd_string: cmd_string.to_string(),
+      cmd: cmd_string.to_string(),
     }
+  }
+  pub fn run(&self) -> Result<Child, std::io::Error> {
+    let mut cmd = tokio::process::Command::new(self.cmd.clone());
+    cmd.stdout(Stdio::piped());
+    cmd.args(self.args.clone());
+
+    cmd.spawn()
   }
 }
 
@@ -63,7 +76,7 @@ fn replace_prefix(prefix: String, key: String, value: String) -> String {
 fn get_name(
   raw_cmd: &str,
   name: Option<String>,
-  index: i32,
+  index: usize,
   prefix: Option<String>,
   length: i16,
 ) -> String {

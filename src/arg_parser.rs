@@ -2,24 +2,14 @@ use std::i32::MAX;
 
 use clap::{arg, command, value_parser, ArgAction, ArgMatches};
 
-#[derive(Clone)]
-pub struct CommandArgs {
-  pub kill_others: bool,
-  pub kill_others_on_fail: bool,
-  pub restart_tries: i64,
-  pub restart_after: i64,
-  pub prefix: Option<String>,
-  pub prefix_length: i16,
-  pub max_processes: i32,
-  pub raw: bool,
-  pub no_color: bool,
-}
+use crate::task::MltiConfig;
+
 
 pub struct CommandParser {
   pub matches: ArgMatches,
   pub names: Vec<String>,
   pub processes: Vec<String>,
-  pub command_args: CommandArgs,
+  pub mlti_config: MltiConfig,
 }
 
 impl CommandParser {
@@ -116,7 +106,7 @@ impl CommandParser {
       matches,
       names,
       processes,
-      command_args: CommandArgs {
+      mlti_config: MltiConfig {
         kill_others,
         kill_others_on_fail,
         restart_tries,
@@ -133,8 +123,8 @@ impl CommandParser {
   pub fn len(&self) -> usize {
     self.processes.len()
   }
-  pub fn get_command_args(&self) -> CommandArgs {
-    self.command_args.clone()
+  pub fn get_mlti_config(&self) -> MltiConfig {
+    self.mlti_config.clone()
   }
 }
 

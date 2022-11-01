@@ -1,5 +1,3 @@
-use std::process::Stdio;
-
 use anyhow::Result;
 use chrono::{Duration, Local};
 use chrono_humanize::{Accuracy, HumanTime, Tense};
@@ -8,48 +6,53 @@ use owo_colors::OwoColorize;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
-use crate::arg_parser::CommandArgs;
-use crate::command::Command;
+use crate::command::Process;
 use crate::message::{Message, MessageType, SenderType};
 
+#[derive(Clone)]
+pub struct MltiConfig {
+  pub kill_others: bool,
+  pub kill_others_on_fail: bool,
+  pub restart_tries: i64,
+  pub restart_after: i64,
+  pub prefix: Option<String>,
+  pub prefix_length: i16,
+  pub max_processes: i32,
+  pub raw: bool,
+  pub no_color: bool,
+}
+
 pub(crate) struct Task {
-  command: Command,
+  process: Process,
   message_tx: Sender<Message>,
   shutdown_tx: Sender<Message>,
-  color: (u8, u8, u8),
- command_args: CommandArgs,
+  mlti_config: MltiConfig,
   exit_code: Option<i32>,
 }
 
 impl Task {
   pub fn new(
-    command: Command,
+    process: Process,
     message_tx: Sender<Message>,
     shutdown_tx: Sender<Message>,
-    color: (u8, u8, u8),
-    command_args: CommandArgs,
-
+    mlti_config: MltiConfig,
   ) -> Self {
     Self {
-      command,
+      process,
       message_tx,
       shutdown_tx,
-      color,
-      command_args,
+      mlti_config,
       exit_code: None,
     }
   }
   pub async fn start(&mut self) -> Result<i32> {
-    let mut cmd = tokio::process::Command::new(self.command.cmd_string.clone());
-
-    cmd.stdout(Stdio::piped());
 
     let mut child: Option<Child> = None;
 
-    let mut restart_attemps = self.command_args.restart_after - 1;
+    let mut restart_attemps = self.mlti_config.restart_after - 1;
 
     loop {
-      let attempt_child = cmd.args(self.command.args.clone()).spawn();
+      let attempt_child = self.process.run();
       match attempt_child {
         Ok(c) => {
           child = Some(c);
@@ -60,7 +63,7 @@ impl Task {
             .shutdown_tx
             .send_async(Message::new(
               MessageType::Error,
-              Some(self.command.name.clone()),
+              Some(self.process.name.clone()),
               Some(format!("{}: {}", "Encountered an Error".red(), e.red())),
               None,
               SenderType::Task,
@@ -68,7 +71,7 @@ impl Task {
             .await
             .expect("Could not send message on channel.");
           if restart_attemps <= 0 {
-            if self.command_args.kill_others_on_fail {
+            if self.mlti_config.kill_others_on_fail {
               self
                 .shutdown_tx
                 .send_async(Message::new(
@@ -87,11 +90,11 @@ impl Task {
               .message_tx
               .send_async(Message::new(
                 MessageType::Error,
-                Some(self.command.name.clone()),
+                Some(self.process.name.clone()),
                 Some(format!(
                   "{}{}",
                   "Process failed to start, retrying in ".red(),
-                  get_relative_time_from_ms(self.command_args.restart_after)
+                  get_relative_time_from_ms(self.mlti_config.restart_after)
                 )),
                 None,
                 SenderType::Task,
@@ -100,7 +103,7 @@ impl Task {
               .expect("Could not send message on channel.");
             restart_attemps -= 1;
             tokio::time::sleep(std::time::Duration::from_millis(
-              self.command_args.restart_after as u64,
+              self.mlti_config.restart_after as u64,
             ))
             .await;
           }
@@ -115,7 +118,7 @@ impl Task {
           .message_tx
           .send_async(Message::new(
             MessageType::Error,
-            Some(self.command.name.clone()),
+            Some(self.process.name.clone()),
             Some(format!(
               "{}",
               "Encountered an Error: Could not start process.".red(),
@@ -135,7 +138,6 @@ impl Task {
       .expect("child did not have a handle to stdout");
 
     let mut reader = BufReader::new(stdout).lines();
-    // stdout
 
     let handle = tokio::spawn(async move {
       return child
@@ -149,9 +151,9 @@ impl Task {
         .message_tx
         .send_async(Message::new(
           MessageType::Text,
-          Some(self.command.name.clone()),
+          Some(self.process.name.clone()),
           Some(line),
-          Some(self.color),
+          Some(self.process.color),
           SenderType::Process,
         ))
         .await
@@ -163,14 +165,14 @@ impl Task {
       .message_tx
       .send_async(Message::new(
         MessageType::Text,
-        Some(self.command.name.clone()),
+        Some(self.process.name.clone()),
         Some("Done!".into()),
-        Some(self.color),
+        Some(self.process.color),
         SenderType::Task,
       ))
       .await
       .expect("Couldnt send message to main thread");
-    if self.command_args.kill_others {
+    if self.mlti_config.kill_others {
       self
         .shutdown_tx
         .send_async(Message::new(
