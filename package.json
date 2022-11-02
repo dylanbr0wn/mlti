@@ -1,14 +1,13 @@
 {
   "name": "mlti",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "mlti is a concurrent process runner for the command line written in Rust.",
   "main": "index.js",
   "bin": {
     "mlti": "./npm/run.js"
   },
   "scripts": {
-    "postinstall": "node ./npm/install.js",
-    "preinstall": "node ./npm/uninstall.js"
+    "postinstall": "node ./npm/install.js"
   },
   "keywords": [],
   "author": "",
