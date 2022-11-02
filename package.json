@@ -1,5 +1,5 @@
 {
-  "name": "rustly",
+  "name": "mlti",
   "version": "0.1.0",
   "description": "mlti is a concurrent process runner for the command line written in Rust.",
   "main": "index.js",
