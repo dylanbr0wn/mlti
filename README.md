@@ -1,4 +1,4 @@
-# MLTI
+# ⚒️ MLTI
 
 MLTI is a concurrent process runner for the command line written in [Rust](https://www.rust-lang.org/). It is currently a straight forward port of the [concurrently](https://github.com/open-cli-tools/concurrently) package for node.js, but will be extended in the future once feature parity is reached.
 
