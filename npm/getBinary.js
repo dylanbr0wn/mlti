@@ -22,7 +22,7 @@ function getBinary() {
   const version = require('../package.json').version;
   const url = `https://github.com/dylanbr0wn/mlti/releases/download/v${version}/mlti-${platform.platform}.tar.gz`;
   console.log(url)
-  const name = `multi${platform.ext}`;
+  const name = `mlti${platform.ext}`;
   return new Binary(name, url);
 }
 
