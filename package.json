@@ -1,6 +1,6 @@
 {
   "name": "mlti",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "mlti is a concurrent process runner for the command line written in Rust.",
   "main": "index.js",
   "bin": {
