@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.66"
+argh = "0.1.9"
 chrono = "0.4.22"
 chrono-humanize = "0.2.2"
-clap = { version = "4.0.18", features = ["cargo"] }
 ctrlc = "3.2.3"
 flume = "0.10.14"
 futures = "0.3.25"

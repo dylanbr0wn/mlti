@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, Error};
 use chrono::{Duration, Local};
 use chrono_humanize::{Accuracy, HumanTime, Tense};
 use flume::Sender;
@@ -6,22 +6,10 @@ use owo_colors::OwoColorize;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
+use crate::MltiConfig;
 use crate::command::Process;
 use crate::message::{build_message_sender, Message, MessageType, SenderType};
 
-#[derive(Clone)]
-pub struct MltiConfig {
-  pub kill_others: bool,
-  pub kill_others_on_fail: bool,
-  pub restart_tries: i64,
-  pub restart_after: i64,
-  pub prefix: Option<String>,
-  pub prefix_length: i16,
-  pub max_processes: i32,
-  pub raw: bool,
-  pub no_color: bool,
-  pub group: bool,
-}
 
 pub(crate) struct Task {
   process: Process,
@@ -46,6 +34,19 @@ impl Task {
       exit_code: None,
     }
   }
+  pub async fn send_error(&self, error: String) {
+    self
+    .shutdown_tx
+    .send_async(Message::new(
+      MessageType::Error,
+      Some(self.process.name.clone()),
+      Some(error),
+      None,
+      build_message_sender(SenderType::Task, None, None),
+    ))
+    .await
+    .expect("Could not send message on channel.");
+  }
   pub async fn start(&mut self) -> Result<i32> {
     let mut child: Option<Child> = None;
 
@@ -60,16 +61,7 @@ impl Task {
         }
         Err(e) => {
           self
-            .shutdown_tx
-            .send_async(Message::new(
-              MessageType::Error,
-              Some(self.process.name.clone()),
-              Some(format!("{}: {}", "Encountered an Error".red(), e.red())),
-              None,
-              build_message_sender(SenderType::Task, None, None),
-            ))
-            .await
-            .expect("Could not send message on channel.");
+            .send_error(format!("{}: {}", "Encountered an Error".red(), e.red())).await;
           if restart_attemps <= 0 {
             if self.mlti_config.kill_others_on_fail {
               self
@@ -87,20 +79,11 @@ impl Task {
             break;
           } else {
             self
-              .message_tx
-              .send_async(Message::new(
-                MessageType::Error,
-                Some(self.process.name.clone()),
-                Some(format!(
-                  "{}{}",
-                  "Process failed to start, retrying in ".red(),
-                  get_relative_time_from_ms(self.mlti_config.restart_after)
-                )),
-                None,
-                build_message_sender(SenderType::Task, None, None),
-              ))
-              .await
-              .expect("Could not send message on channel.");
+              .send_error(format!(
+                "{}{}",
+                "Process failed to start, retrying in ".red(),
+                get_relative_time_from_ms(self.mlti_config.restart_after)
+              )).await;
             restart_attemps -= 1;
             tokio::time::sleep(std::time::Duration::from_millis(
               self.mlti_config.restart_after as u64,
@@ -115,19 +98,10 @@ impl Task {
       Some(c) => c,
       None => {
         self
-          .message_tx
-          .send_async(Message::new(
-            MessageType::Error,
-            Some(self.process.name.clone()),
-            Some(format!(
-              "{}",
-              "Encountered an Error: Could not start process.".red(),
-            )),
-            None,
-            build_message_sender(SenderType::Task, None, None),
-          ))
-          .await
-          .expect("Could not send message on channel.");
+          .send_error(format!(
+            "{}",
+            "Encountered an Error: Could not start process.".red(),
+          )).await;
         return Ok(1);
       }
     };
