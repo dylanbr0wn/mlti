@@ -27,10 +27,10 @@ Ultimately this is a project to help me learn threading in Rust but I do have lo
   - [ ] `--timings` flag
   - [ ] `--passthrough-arguments` flag
   - [ ] `--prefix-colors` flag
-  - [ ] `--timestamp-format` flag
+  - [x] `--timestamp-format` flag
   - [ ] npm/yarn/pnpm pattern matching
 - [ ] Explore adding shortcuts for other languages/package managers
-- [ ] Make available on npm package registry
+- [x] Make available on npm package registry
 - [ ] Make available through cargo
 - [ ] Add a parallel/sequential flag
 - [ ] Add shorthand combo aliases to combine flags
