@@ -9,6 +9,7 @@ pub(crate) struct Process {
   pub cmd: String,
   pub index: usize,
   pub color: (u8, u8, u8),
+  pub hidden: bool
 }
 
 impl Process {
@@ -19,7 +20,7 @@ impl Process {
     prefix: Option<String>,
     length: i16,
     color: (u8, u8, u8),
-    timestamp_format: String
+    timestamp_format: String,
   ) -> Self {
     let parsed_cmd = parse(&raw_cmd).unwrap();
 
@@ -37,7 +38,11 @@ impl Process {
       name,
       args,
       cmd: cmd_string.into(),
+      hidden: false
     }
+  }
+  pub fn set_hidden(&mut self, hidden: bool) {
+    self.hidden = hidden;
   }
   pub fn run(&self) -> Result<Child, std::io::Error> {
     let mut cmd = tokio::process::Command::new(self.cmd.clone());

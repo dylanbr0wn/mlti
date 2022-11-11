@@ -46,7 +46,11 @@ pub struct Commands {
 
     /// kill other processes if one exits with a non-zero exit code.
     #[argh(switch)]
-   kill_others_on_fail: bool,
+    kill_others_on_fail: bool,
+
+    /// hide the output of the processes.
+    #[argh(option)]
+    hide: Option<String>,
 
     /// how many times a process will attempt to restart.
     #[argh(option, default="default_restart_tries()")]
@@ -93,23 +97,6 @@ pub struct Commands {
     timestamp_format: String,
 }
 
-
-
-
-#[derive(Clone)]
-pub struct MltiConfig {
-  pub kill_others: bool,
-  pub kill_others_on_fail: bool,
-  pub restart_tries: i64,
-  pub restart_after: i64,
-  pub prefix: Option<String>,
-  pub prefix_length: i16,
-  pub max_processes: i32,
-  pub raw: bool,
-  pub no_color: bool,
-  pub group: bool,
-  pub timestamp_format: String,
-}
 
 pub fn parse_names(names: &Option<String>, seperator: &String) -> Vec<String> {
 
@@ -226,6 +213,7 @@ async fn main() -> Result<()> {
   });
 
   let names = parse_names(&commands.names, &commands.names_seperator);
+  let hidden_cmds = parse_hidden(&commands.hide);
 
   for (i,cmd) in commands.processes.iter().enumerate() {
     let r = rng.gen_range(75..255);
@@ -233,7 +221,8 @@ async fn main() -> Result<()> {
     let b = rng.gen_range(75..255);
     let name = names.get(i).map(|x| x.to_string());
 
-    let my_cmd = Process::new(
+
+    let mut my_cmd = Process::new(
       cmd.clone(),
       name,
       i,
@@ -242,6 +231,8 @@ async fn main() -> Result<()> {
       (r, g, b),
       commands.timestamp_format.clone(),
     );
+
+    my_cmd.set_hidden(hidden_cmds.contains(&my_cmd.name));
 
     task_queue
       .send_async(Task::new(
@@ -368,4 +359,12 @@ async fn main() -> Result<()> {
     commands.no_color,
   );
   Ok(())
+}
+
+
+fn parse_hidden(hide: &Option<String>) -> Vec<String> {
+  match hide {
+    Some(h) => h.split(",").map(|x| x.to_string()).collect(),
+    None => vec![],
+  }
 }

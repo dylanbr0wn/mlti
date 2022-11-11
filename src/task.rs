@@ -57,6 +57,15 @@ impl Task {
     .await
     .expect("Could not send message on channel.");
   }
+  pub async fn send_message(&self, message: Message) {
+    if !self.process.hidden {
+      self
+      .message_tx
+      .send_async(message)
+      .await
+      .expect("Couldnt send message to main thread");
+    }
+  }
   pub async fn start(&mut self) -> Result<i32> {
     let mut child: Option<Child> = None;
 
@@ -131,35 +140,27 @@ impl Task {
     });
 
     while let Some(line) = reader.next_line().await.unwrap_or_default() {
-      self
-        .message_tx
-        .send_async(Message::new(
-          MessageType::Text,
+      self.send_message(Message::new(
+        MessageType::Text,
+        Some(self.process.name.clone()),
+        Some(line),
+        Some(self.process.color),
+        build_message_sender(
+          SenderType::Process,
+          Some(self.process.index),
           Some(self.process.name.clone()),
-          Some(line),
-          Some(self.process.color),
-          build_message_sender(
-            SenderType::Process,
-            Some(self.process.index),
-            Some(self.process.name.clone()),
-          ),
-        ))
-        .await
-        .expect("Couldnt send message to main thread");
+        ),
+      )).await;
     }
     let status = handle.await.unwrap();
     self.exit_code = Some(status.code().unwrap_or(-1));
-    self
-      .message_tx
-      .send_async(Message::new(
-        MessageType::Text,
-        Some(self.process.name.clone()),
-        Some("Done!".into()),
-        Some(self.process.color),
-        self.signature.clone()
-      ))
-      .await
-      .expect("Couldnt send message to main thread");
+    self.send_message(Message::new(
+      MessageType::Text,
+      Some(self.process.name.clone()),
+      Some("Done!".into()),
+      Some(self.process.color),
+      self.signature.clone()
+    )).await;
     if self.kill_others {
       self
         .shutdown_tx
