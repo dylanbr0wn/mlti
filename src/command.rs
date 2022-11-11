@@ -36,7 +36,7 @@ impl Process {
       index,
       name,
       args,
-      cmd: cmd_string.to_string(),
+      cmd: cmd_string.into(),
     }
   }
   pub fn run(&self) -> Result<Child, std::io::Error> {

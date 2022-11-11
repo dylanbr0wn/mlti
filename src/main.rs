@@ -7,8 +7,6 @@ use anyhow::Result;
 use task::Task;
 use argh::FromArgs;
 
-use std::i32::MAX;
-
 use crate::{message::SenderType, messenger::print_message};
 
 mod command;
@@ -31,7 +29,7 @@ fn default_names_separator() -> String {
 }
 
 
-#[derive(FromArgs)]
+#[derive(FromArgs, Clone)]
 /// Launch some commands concurrently
 pub struct Commands {
     /// names of processes
@@ -86,14 +84,16 @@ pub struct Commands {
     #[argh(positional)]
     processes: Vec<String>,
 
-    /// print version
-    #[argh(switch, short = 'v')]
-    version: bool,
+    // /// print version
+    // #[argh(switch, short = 'v')]
+    // version: bool,
 
     /// timestamp format for logging
     #[argh(option, short = 't', default = "String::from(\"%Y-%m-%d %H:%M:%S\")")]
     timestamp_format: String,
 }
+
+
 
 
 #[derive(Clone)]
@@ -111,87 +111,34 @@ pub struct MltiConfig {
   pub timestamp_format: String,
 }
 
-pub struct CommandParser {
-  pub names: Vec<String>,
-  pub processes: Vec<String>,
-  pub mlti_config: MltiConfig,
-}
-
-impl CommandParser {
-  pub fn new(commands:Commands) -> Self {
-    Self {
-      names: parse_names(commands.names, commands.names_seperator),
-      processes: commands.processes,
-      mlti_config: MltiConfig {
-        group: commands.group,
-        kill_others: commands.kill_others,
-        kill_others_on_fail: commands.kill_others_on_fail,
-        restart_tries: commands.restart_tries,
-        restart_after: commands.restart_after,
-        prefix:   commands.prefix,
-        prefix_length: commands.prefix_length,
-        max_processes: parse_max_processes(commands.max_processes),
-        raw:    commands.raw,
-        no_color: commands.no_color,
-        timestamp_format: commands.timestamp_format,
-      },
-    }
-  }
-
-  pub fn len(&self) -> usize {
-    self.processes.len()
-  }
-  pub fn get_mlti_config(&self) -> MltiConfig {
-    self.mlti_config.clone()
-  }
-}
-
-pub fn parse_names(names: Option<String>, seperator: String) -> Vec<String> {
+pub fn parse_names(names: &Option<String>, seperator: &String) -> Vec<String> {
 
   let names = match names {
-    Some(names) => names.split(&seperator).map(|x| x.to_string()).collect(),
+    Some(names) => names.split(seperator).map(|x| x.to_string()).collect(),
     None => vec![],
   };
   names
 }
 
-pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
-  match max_processes {
-    Some(max) => {
-      if max.contains('%') {
-        let percentage = str::parse::<i32>(&max.replace('%', ""))
-          .expect("Could not parse percentage");
-        let cpus = num_cpus::get();
-
-        (cpus as f32 * (percentage as f32 / 100.0)) as i32
-      } else {
-        str::parse::<i32>(&max).expect("Could not parse max processes")
-      }
-    }
-    None => MAX, // fuck it why not
-  }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
   let commands: Commands = argh::from_env();
   let red_style = Style::new().red();
   let bold_green_style = Style::new().bold().green();
-  let arg_parser = CommandParser::new(commands);
-  let mlti_config = arg_parser.get_mlti_config();
 
   let mut shutdown_messenger = messenger::Messenger::new(
-    mlti_config.raw,
-    mlti_config.no_color,
-    arg_parser.len(),
+    commands.raw,
+    commands.no_color,
+    commands.processes.len(),
     false,
   );
   let shutdown_tx = shutdown_messenger.get_sender();
   let mut messenger = messenger::Messenger::new(
-    mlti_config.raw,
-    mlti_config.no_color,
-    arg_parser.len(),
-    mlti_config.group,
+    commands.raw,
+    commands.no_color,
+    commands.processes.len(),
+    commands.group,
   );
   let message_tx = messenger.get_sender();
 
@@ -242,14 +189,14 @@ async fn main() -> Result<()> {
   })
   .expect("Error setting Ctrl-C handler");
 
-  if arg_parser.len() == 0 {
+  if commands.processes.is_empty() {
     print_message(
       SenderType::Main,
       "".into(),
       "No processes to run. Goodbye! 👋".into(),
       bold_green_style,
-      mlti_config.raw,
-      mlti_config.no_color,
+      commands.raw,
+      commands.no_color,
     );
     messenger_handle.abort();
     return Ok(());
@@ -258,20 +205,16 @@ async fn main() -> Result<()> {
   print_message(
     SenderType::Main,
     "".into(),
-    format!("\n{} {}\n", arg_parser.len(), "processes to run ✅"),
+    format!("\n{} {}\n", commands.processes.len(), "processes to run ✅"),
     bold_green_style,
-    mlti_config.raw,
-    mlti_config.no_color,
+    commands.raw,
+    commands.no_color,
   );
 
-  let scheduler = scheduler::Scheduler::new(
+  let mut scheduler = scheduler::Scheduler::new(
     shutdown_tx.clone(),
-    mlti_config.max_processes,
-    arg_parser.len() as i32,
+    commands.clone()
   );
-
-  // let mut unnamed_counter = -1;
-
   let mut rng = rand::thread_rng();
 
   // let mut tasks: Vec<Task> = vec![];
@@ -282,20 +225,22 @@ async fn main() -> Result<()> {
     scheduler.run().await;
   });
 
-  for i in 0..arg_parser.len() {
+  let names = parse_names(&commands.names, &commands.names_seperator);
+
+  for (i,cmd) in commands.processes.iter().enumerate() {
     let r = rng.gen_range(75..255);
     let g = rng.gen_range(75..255);
     let b = rng.gen_range(75..255);
-    let name = arg_parser.names.get(i).map(|name| name.to_string());
+    let name = names.get(i).map(|x| x.to_string());
 
     let my_cmd = Process::new(
-      arg_parser.processes[i].clone(),
+      cmd.clone(),
       name,
       i,
-      mlti_config.prefix.clone(),
-      mlti_config.prefix_length,
+      commands.prefix.clone(),
+      commands.prefix_length,
       (r, g, b),
-      mlti_config.timestamp_format.clone(),
+      commands.timestamp_format.clone(),
     );
 
     task_queue
@@ -303,7 +248,10 @@ async fn main() -> Result<()> {
         my_cmd,
         message_tx.clone(),
         shutdown_tx.clone(),
-        mlti_config.to_owned(),
+        commands.restart_after,
+        commands.kill_others_on_fail,
+        commands.kill_others,
+        commands.restart_tries
       ))
       .await
       .expect("Could not send task on channel.");
@@ -416,8 +364,8 @@ async fn main() -> Result<()> {
     "".into(),
     format!("\n{}", "Goodbye! 👋"),
     bold_green_style,
-    mlti_config.raw,
-    mlti_config.no_color,
+    commands.raw,
+    commands.no_color,
   );
   Ok(())
 }

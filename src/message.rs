@@ -13,12 +13,14 @@ pub enum MessageType {
   Complete,
 }
 
+#[derive(Clone)]
 pub struct MessageSender {
   pub index: Option<usize>,
   pub name: String,
   pub type_: SenderType,
 }
 
+#[derive(Clone)]
 pub enum SenderType {
   Process,
   Scheduler,
