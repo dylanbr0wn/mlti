@@ -114,6 +114,7 @@ async fn main() -> Result<()> {
   let red_style = Style::new().red();
   let bold_green_style = Style::new().bold().green();
 
+  // messenger for signalling shutdown scenrios
   let mut shutdown_messenger = messenger::Messenger::new(
     commands.raw,
     commands.no_color,
@@ -121,6 +122,8 @@ async fn main() -> Result<()> {
     false,
   );
   let shutdown_tx = shutdown_messenger.get_sender();
+
+  // genereal messenger to relay from child procs
   let mut messenger = messenger::Messenger::new(
     commands.raw,
     commands.no_color,
@@ -129,6 +132,7 @@ async fn main() -> Result<()> {
   );
   let message_tx = messenger.get_sender();
 
+  // run the messenger isntance
   let messenger_handle = tokio::spawn(async move {
     messenger
       .listen(
@@ -162,6 +166,7 @@ async fn main() -> Result<()> {
       .await;
   });
 
+  // ctrlx listener
   let ctrlx_tx = shutdown_tx.clone();
   ctrlc::set_handler(move || {
     ctrlx_tx
@@ -176,6 +181,7 @@ async fn main() -> Result<()> {
   })
   .expect("Error setting Ctrl-C handler");
 
+  // if empty, short circuit
   if commands.processes.is_empty() {
     print_message(
       SenderType::Main,
@@ -208,6 +214,7 @@ async fn main() -> Result<()> {
   let task_queue = scheduler.get_task_queue();
   let kill_all = scheduler.get_kill_all();
 
+  // start scheduler
   let scheduler_handler = tokio::spawn(async move {
     scheduler.run().await;
   });
@@ -215,6 +222,7 @@ async fn main() -> Result<()> {
   let names = parse_names(&commands.names, &commands.names_seperator);
   let hidden_cmds = parse_hidden(&commands.hide);
 
+  // add tasks to queue for scheduler to run
   for (i,cmd) in commands.processes.iter().enumerate() {
     let r = rng.gen_range(75..255);
     let g = rng.gen_range(75..255);

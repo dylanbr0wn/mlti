@@ -59,10 +59,16 @@ fn npm_expander(cmd: &str) -> String {
 fn pnpm_expander(cmd: &str) -> String {
   cmd.replace("pnpm:", "pnpm ")
 }
+fn yarn_expander(cmd: &str) -> String {
+  cmd.replace("yarn:", "yarn ")
+}
 
 pub fn expand(cmd: &str) -> String {
-  let cmd = pnpm_expander(cmd);
-  npm_expander(&cmd)
+  let cmd = pnpm_expander(&cmd);
+  let cmd = npm_expander(&cmd);
+  let cmd = yarn_expander(&cmd);
+
+  cmd
 }
 
 pub fn parse(raw_cmd: &str) -> Result<String> {

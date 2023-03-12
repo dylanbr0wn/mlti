@@ -5,6 +5,7 @@ use flume::Sender;
 use owo_colors::OwoColorize;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
+use tokio::time::Instant;
 
 use crate::command::Process;
 use crate::message::{build_message_sender, Message, MessageType, SenderType, MessageSender};
@@ -131,7 +132,7 @@ impl Task {
       .expect("child did not have a handle to stdout");
 
     let mut reader = BufReader::new(stdout).lines();
-
+    let now = Instant::now();
     let handle = tokio::spawn(async move {
       child
         .wait()
@@ -139,6 +140,7 @@ impl Task {
         .expect("child process encountered an error")
     });
 
+    // While running, send messages to the message_tx channel
     while let Some(line) = reader.next_line().await.unwrap_or_default() {
       self.send_message(Message::new(
         MessageType::Text,
@@ -153,6 +155,9 @@ impl Task {
       )).await;
     }
     let status = handle.await.unwrap();
+    let elapsed = now.elapsed().as_millis();
+
+    // Done running, send a message to the message_tx channel
     self.exit_code = Some(status.code().unwrap_or(-1));
     self.send_message(Message::new(
       MessageType::Text,
@@ -161,6 +166,8 @@ impl Task {
       Some(self.process.color),
       self.signature.clone()
     )).await;
+
+    //
     if self.kill_others {
       self
         .shutdown_tx
