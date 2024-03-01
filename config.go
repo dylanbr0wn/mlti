@@ -27,6 +27,7 @@ type Config struct {
 var max_processes = NewFlag(
 	Name("max-processes"),
 	Description("Maximum number of processes to run at once."),
+	Short("m"),
 ).String()
 
 var names = NewFlag(
@@ -46,11 +47,13 @@ var success_terms = NewFlag(
 	Name("success-terms"),
 	Description("Which command(s) must exit with code 0 in order for mlti to exit with code 0 too."),
 	Default("all"),
+	Short("s"),
 ).String()
 
 var raw = NewFlag(
 	Name("raw"),
 	Description("Print the raw output of the commands."),
+	Short("r"),
 ).Bool()
 
 var no_color = NewFlag(
@@ -83,11 +86,13 @@ var prefix = NewFlag(
 	Name("prefix"),
 	Description("Prefix the output of the commands."),
 	Default("index"),
+	Short("p"),
 ).String()
 
 var prefix_colors = NewFlag(
 	Name("prefix-colors"),
 	Description("Colors for the prefixes."),
+	Short("c"),
 ).String()
 
 var TimestampFormat = NewFlag(
@@ -98,8 +103,9 @@ var TimestampFormat = NewFlag(
 
 var kill_others = NewFlag(
 	Name("kill-others"),
-	Description("Kill other processes when one fails."),
+	Description("Kill other processes when one ends."),
 	Default(false),
+	Short("k"),
 ).Bool()
 
 var kill_others_on_fail = NewFlag(
