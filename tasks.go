@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"time"
 )
 
 type Task struct {
@@ -30,12 +31,22 @@ func (t *Task) Run(ctx context.Context) {
 	cmd := exec.CommandContext(ctx, t.cmd.Name, t.cmd.Args...)
 	cmd.Stdout = t
 	cmd.Stderr = t
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			t.exitCode = exitErr.ExitCode()
+	for i := 0; i < t.config.RestartTries; i++ {
+		if err := cmd.Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				t.exitCode = exitErr.ExitCode()
+			}
+			t.err = fmt.Errorf("Error running command %s: %w", t.cmd.Name, err)
+			fmt.Print(t.err.Error())
+			// want to delay, if there is a delay, every time before the last time
+			if t.config.RestartAfter > 0 && i < t.config.RestartTries-1 {
+				// sleep for a while before restarting
+				time.Sleep(time.Duration(t.config.RestartAfter) * time.Second)
+				fmt.Printf("Restarting %s\n", t.cmd.DisplayName)
+			}
+		} else {
+			break
 		}
-		t.err = fmt.Errorf("Error running command %s: %w", t.cmd.Name, err)
-		fmt.Printf("Error running command %s: %v\n", t.cmd.Name, err)
 	}
 }
 

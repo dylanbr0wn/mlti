@@ -13,13 +13,13 @@ import (
 
 type Report struct {
 	commandId int
-	content   string
+	details   string
 }
 
 func NewReport(id int, content string) Report {
 	return Report{
 		commandId: id,
-		content:   content,
+		details:   content,
 	}
 }
 
@@ -53,68 +53,69 @@ func NewPrinter(ctx context.Context, config PrinterConfig) *Printer {
 	return printer
 }
 
-func (r *Printer) Send(report Report) {
-	r.queueChan <- report
+func (p *Printer) Send(report Report) {
+	p.queueChan <- report
 }
 
-func (r *Printer) Print(ctx context.Context) {
+func (p *Printer) format(report Report) string {
+	if style, ok := p.config.styles[report.commandId]; ok {
+		// check if its hidden
+		if style.show {
+
+			prefix := style.displayName
+			if p.config.timings {
+				prefix = fmt.Sprintf("[%s] %s", time.Now().Format(p.config.timingFormat), prefix)
+			}
+
+			styledPrefix := style.style.Bold(true).Render(prefix)
+			styledDetails := style.style.Render(strings.TrimSpace(report.details))
+
+			return fmt.Sprintf("%s: %s\n", styledPrefix, styledDetails)
+		}
+	}
+	return "\n"
+}
+
+func (p *Printer) Print(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case report := <-r.queueChan:
-			r.print(report)
+		case report := <-p.queueChan:
+			p.print(report)
 		}
 	}
 }
 
-func (r *Printer) Group(ctx context.Context) {
+func (p *Printer) print(report Report) {
+	if content := p.format(report); content != "" {
+		fmt.Print(content)
+	}
+}
+
+func (p *Printer) Group(ctx context.Context) {
 outer:
 	for {
 		select {
 		case <-ctx.Done():
 			break outer
-		case report := <-r.queueChan:
-			r.group(report)
+		case report := <-p.queueChan:
+			p.group(report)
 		}
 	}
-	for _, g := range r.groupedReports {
+	for _, g := range p.groupedReports {
 		for _, r := range g {
 			fmt.Print(r)
 		}
 	}
 }
 
-func (r *Printer) group(report Report) {
-	if style, ok := r.config.styles[report.commandId]; ok {
-		// check if its hidden
-		if style.show {
-
-			prefix := style.displayName
-			if r.config.timings {
-				prefix = fmt.Sprintf("[%s] %s", time.Now().Format(r.config.timingFormat), prefix)
-			}
-
-			fmt.Sprintf("%s: %s", style.style.Bold(true).Render(prefix), style.style.Render(strings.TrimSpace(report.content)))
-			r.pushToGroup(report.commandId)
-		}
-	}
-}
-
-func (r *Printer) pushToGroup(id int, content string) {
-	if _, ok := r.groupedReports[id]; !ok {
-		r.groupedReports[id] = make([]string, 256)
-		r.groupedReports[id] = append(r.groupedReports[id], content)
-	} else {
-		r.groupedReports[id] = append(r.groupedReports[id], content)
-	}
-}
-
-func (r *Printer) print(report Report) {
-	if style, ok := r.config.styles[report.commandId]; ok {
-		// check if its hidden
-		if style.show {
-			fmt.Printf("%s: %s\n", style.style.Bold(true).Render(style.displayName), style.style.Render(strings.TrimSpace(report.content)))
+func (p *Printer) group(report Report) {
+	if content := p.format(report); content != "" {
+		if _, ok := p.groupedReports[report.commandId]; !ok {
+			p.groupedReports[report.commandId] = append(make([]string, 256), content)
+		} else {
+			p.groupedReports[report.commandId] = append(p.groupedReports[report.commandId], content)
 		}
 	}
 }
