@@ -1,9 +1,13 @@
 package main
 
-import "strings"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 type Config struct {
-	MaxProcesses     string   `json:"max-processes"`
+	MaxProcesses     int      `json:"max-processes"`
 	Names            []string `json:"names"`
 	NameSeparator    string   `json:"name-separator"`
 	SuccessTerms     []string `json:"success-terms"`
@@ -24,118 +28,17 @@ type Config struct {
 	RestartAfter     int      `json:"restart-after"`
 }
 
-var max_processes = NewFlag(
-	Name("max-processes"),
-	Description("Maximum number of processes to run at once."),
-	Short("m"),
-).String()
+func LoadConfig(commands []*Command) *Config {
 
-var names = NewFlag(
-	Name("names"),
-	Description("Names of the processes to run."),
-	Short("n"),
-	Default("lol"),
-).String()
+	names := strings.Split(names.Get(), name_separator.Get())
 
-var name_separator = NewFlag(
-	Name("name-separator"),
-	Description("Separator for the names of the processes to run."),
-	Default(","),
-).String()
+	for i, name := range names {
+		commands[i].DisplayName = name
+	}
 
-var success_terms = NewFlag(
-	Name("success-terms"),
-	Description("Which command(s) must exit with code 0 in order for mlti to exit with code 0 too."),
-	Default("all"),
-	Short("s"),
-).String()
-
-var raw = NewFlag(
-	Name("raw"),
-	Description("Print the raw output of the commands."),
-	Short("r"),
-).Bool()
-
-var no_color = NewFlag(
-	Name("no-color"),
-	Description("Disable color output."),
-).Bool()
-
-var hide = NewFlag(
-	Name("hide"),
-	Description("Hide the output of the commands."),
-).String()
-
-var group = NewFlag(
-	Name("group"),
-	Description("Group the output of the commands."),
-	Short("g"),
-).Bool()
-
-var timings = NewFlag(
-	Name("timings"),
-	Description("Show the timings of the commands."),
-).Bool()
-
-var pass_through = NewFlag(
-	Name("pass-through"),
-	Description("Pass the output of the commands through."),
-).Bool()
-
-var prefix = NewFlag(
-	Name("prefix"),
-	Description("Prefix the output of the commands."),
-	Default("index"),
-	Short("p"),
-).String()
-
-var prefix_colors = NewFlag(
-	Name("prefix-colors"),
-	Description("Colors for the prefixes."),
-	Short("c"),
-).String()
-
-var TimestampFormat = NewFlag(
-	Name("timestamp-format"),
-	Description("Format for the timestamps."),
-	Default("yyyy-MM-dd HH:mm:ss.SSS"),
-).String()
-
-var kill_others = NewFlag(
-	Name("kill-others"),
-	Description("Kill other processes when one ends."),
-	Default(false),
-	Short("k"),
-).Bool()
-
-var kill_others_on_fail = NewFlag(
-	Name("kill-others-on-fail"),
-	Description("Kill other processes when one fails."),
-).Bool()
-
-var kill_signal = NewFlag(
-	Name("kill-signal"),
-	Description("Signal to send to the processes."),
-	Default("SIGTERM"),
-).String()
-
-var restart_tries = NewFlag(
-	Name("restart-tries"),
-	Description("Number of times to restart a process."),
-	Default(10),
-).Int()
-
-var restart_after = NewFlag(
-	Name("restart-after"),
-	Description("Number of seconds to wait before restarting a process."),
-	Default(0),
-).Int()
-
-func LoadConfigFromFlags() *Config {
-	ParseFlags()
 	return &Config{
-		MaxProcesses:     max_processes.Get(),
-		Names:            strings.Split(names.Get(), name_separator.Get()),
+		MaxProcesses:     calculateMaxProcesses(max_processes.Get(), len(commands)),
+		Names:            names,
 		NameSeparator:    name_separator.Get(),
 		SuccessTerms:     strings.Split(success_terms.Get(), ","),
 		Raw:              raw.Get(),
@@ -152,5 +55,25 @@ func LoadConfigFromFlags() *Config {
 		KillSignal:       kill_signal.Get(),
 		RestartTries:     restart_tries.Get(),
 		RestartAfter:     restart_after.Get(),
+	}
+}
+func calculateMaxProcesses(max string, total int) int {
+	if max == "" || max == "0" {
+		return total
+	}
+	if strings.HasSuffix(max, "%") {
+		percent, err := strconv.Atoi(strings.TrimSuffix(max, "%"))
+		if err != nil {
+			fmt.Printf("Error parsing max-processes: %v\n", err)
+			return 0
+		}
+		return int(float64(total) * (float64(percent) / 100))
+	} else {
+		maxProcesses, err := strconv.Atoi(max)
+		if err != nil {
+			fmt.Printf("Error parsing max-processes: %v\n", err)
+			return 0
+		}
+		return maxProcesses
 	}
 }

@@ -4,9 +4,9 @@ import (
 	"flag"
 )
 
-type OptFunc func(*Opts)
+type FlagOptsFunc func(*FlagOpts)
 
-type Opts struct {
+type FlagOpts struct {
 	name        string
 	description string
 	short       string
@@ -14,46 +14,36 @@ type Opts struct {
 	defaultVal  interface{}
 }
 
-func defaultOpts() Opts {
-	return Opts{
-		name:        "",
-		description: "",
-		short:       "",
-		defaultVal:  nil,
-		required:    false,
-	}
-}
-
-func Name(name string) OptFunc {
-	return func(o *Opts) {
+func Name(name string) FlagOptsFunc {
+	return func(o *FlagOpts) {
 		o.name = name
 	}
 }
 
-func Description(description string) OptFunc {
-	return func(o *Opts) {
+func Description(description string) FlagOptsFunc {
+	return func(o *FlagOpts) {
 		o.description = description
 	}
 }
 
-func Short(short string) OptFunc {
-	return func(o *Opts) {
+func Short(short string) FlagOptsFunc {
+	return func(o *FlagOpts) {
 		o.short = short
 	}
 }
 
-func Required(o *Opts) {
+func Required(o *FlagOpts) {
 	o.required = true
 }
 
-func Default(val interface{}) OptFunc {
-	return func(o *Opts) {
+func Default(val interface{}) FlagOptsFunc {
+	return func(o *FlagOpts) {
 		o.defaultVal = val
 	}
 }
 
 type Flag struct {
-	Opts
+	FlagOpts
 }
 
 type StringFlag struct {
@@ -110,12 +100,12 @@ func (f *BoolFlag) Get() bool {
 	return *f.value[0]
 }
 
-func NewFlag(opts ...OptFunc) *Flag {
-	o := defaultOpts()
+func NewFlag(opts ...FlagOptsFunc) *Flag {
+	o := FlagOpts{}
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return &Flag{Opts: o}
+	return &Flag{FlagOpts: o}
 }
 
 func (f *Flag) String() *StringFlag {
@@ -158,4 +148,8 @@ func (f *Flag) Bool() *BoolFlag {
 
 func ParseFlags() {
 	flag.Parse()
+}
+
+func GetArgs() []string {
+	return flag.Args()
 }
