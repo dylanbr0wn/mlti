@@ -68,9 +68,8 @@ func (p *Printer) format(report Report) string {
 			}
 
 			styledPrefix := style.style.Bold(true).Render(prefix)
-			styledDetails := style.style.Render(strings.TrimSpace(report.details))
 
-			return fmt.Sprintf("%s: %s\n", styledPrefix, styledDetails)
+			return fmt.Sprintf("%s: %s\n", styledPrefix, strings.TrimSpace(report.details))
 		}
 	}
 	return "\n"
@@ -129,8 +128,10 @@ type CommandStyle struct {
 func GenerateCommandStyles(commands []*Command, hidden []string) map[int]CommandStyle {
 	colorFactory := NewColorFactory(Pastel)
 	styles := make(map[int]CommandStyle)
+
 	for _, command := range commands {
 		if slices.Contains(hidden, fmt.Sprintf("%d", command.id)) || slices.Contains(hidden, command.DisplayName) {
+			println(command.id, command.DisplayName)
 			styles[command.id] = CommandStyle{
 				show: false,
 			}

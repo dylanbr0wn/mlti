@@ -17,7 +17,6 @@ var names = NewFlag(
 	Name("names"),
 	Description("Names of the processes to run."),
 	Short("n"),
-	Default("lol"),
 ).String()
 
 var name_separator = NewFlag(

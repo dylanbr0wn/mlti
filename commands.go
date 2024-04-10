@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -83,7 +84,6 @@ func LoadCommands() []*Command {
 	index := 0
 	for _, arg := range inputArg {
 		parts := strings.Split(arg, " ")
-
 		if len(parts) == 0 {
 			continue
 		} else if len(parts) == 1 {
@@ -102,7 +102,7 @@ func LoadCommands() []*Command {
 
 				matchedScripts, _ := FilterScripts(nodeScripts, script)
 				for _, matchedScript := range matchedScripts {
-					fullCommandParts := strings.Split(expandedCommand+" "+matchedScript, " ")
+					fullCommandParts := slices.Concat(strings.Split(strings.TrimSpace(expandedCommand), " "), strings.Split(strings.TrimSpace(matchedScript), " "))
 					commands = append(commands, &Command{
 						id:          index,
 						Name:        fullCommandParts[0],

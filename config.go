@@ -29,17 +29,21 @@ type Config struct {
 }
 
 func LoadConfig(commands []*Command) *Config {
-
-	names := strings.Split(names.Get(), name_separator.Get())
-
-	for i, name := range names {
-		commands[i].DisplayName = name
+	names := names.Get()
+	name_separator := name_separator.Get()
+	namesSlice := []string{}
+	if strings.Contains(names, name_separator) {
+		namesSlice = strings.Split(names, name_separator)
+		for i, name := range namesSlice {
+			println("me")
+			commands[i].DisplayName = name
+		}
 	}
 
 	return &Config{
 		MaxProcesses:     calculateMaxProcesses(max_processes.Get(), len(commands)),
-		Names:            names,
-		NameSeparator:    name_separator.Get(),
+		Names:            namesSlice,
+		NameSeparator:    name_separator,
 		SuccessTerms:     strings.Split(success_terms.Get(), ","),
 		Raw:              raw.Get(),
 		NoColor:          no_color.Get(),
