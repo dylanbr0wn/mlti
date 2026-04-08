@@ -7,6 +7,7 @@ pub(crate) struct Process {
   pub name: String,
   pub args: Vec<String>,
   pub cmd: String,
+  pub raw_cmd: String,
   pub index: usize,
   pub color: (u8, u8, u8),
 }
@@ -37,6 +38,7 @@ impl Process {
       name,
       args,
       cmd: cmd_string.to_string(),
+      raw_cmd: raw_cmd.clone(),
     }
   }
   pub fn run(&self) -> Result<Child, std::io::Error> {

@@ -138,13 +138,14 @@ impl Task {
         .expect("Couldnt send message to main thread");
     }
     let status = handle.await.unwrap();
-    self.exit_code = Some(status.code().unwrap_or(-1));
+    let code = status.code().unwrap_or(-1);
+    self.exit_code = Some(code);
     self
       .message_tx
       .send_async(Message::new(
         MessageType::Text,
         Some(self.process.name.clone()),
-        Some("Done!".into()),
+        Some(format!("{} exited with code {}", self.process.raw_cmd, code)),
         Some(self.process.color),
         build_message_sender(SenderType::Task, None, None),
       ))
