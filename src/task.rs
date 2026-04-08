@@ -50,7 +50,7 @@ impl Task {
   pub async fn start(&mut self) -> Result<i32> {
     let mut child: Option<Child> = None;
 
-    let mut restart_attemps = self.mlti_config.restart_after - 1;
+    let mut restart_attempts = self.mlti_config.restart_tries - 1;
 
     loop {
       let attempt_child = self.process.run();
@@ -62,7 +62,7 @@ impl Task {
         Err(e) => {
           self
             .send_error(format!("{}: {}", "Encountered an Error".red(), e.red())).await;
-          if restart_attemps <= 0 {
+          if restart_attempts <= 0 {
             if self.mlti_config.kill_others_on_fail {
               self
                 .shutdown_tx
@@ -84,7 +84,7 @@ impl Task {
                 "Process failed to start, retrying in ".red(),
                 get_relative_time_from_ms(self.mlti_config.restart_after)
               )).await;
-            restart_attemps -= 1;
+            restart_attempts -= 1;
             tokio::time::sleep(std::time::Duration::from_millis(
               self.mlti_config.restart_after as u64,
             ))
