@@ -111,7 +111,13 @@ impl Task {
       .take()
       .expect("child did not have a handle to stdout");
 
-    let mut reader = BufReader::new(stdout).lines();
+    let stderr = child
+      .stderr
+      .take()
+      .expect("child did not have a handle to stderr");
+
+    let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stderr_reader = BufReader::new(stderr).lines();
 
     let handle = tokio::spawn(async move {
       child
@@ -120,22 +126,62 @@ impl Task {
         .expect("child process encountered an error")
     });
 
-    while let Some(line) = reader.next_line().await.unwrap_or_default() {
-      self
-        .message_tx
-        .send_async(Message::new(
-          MessageType::Text,
-          Some(self.process.name.clone()),
-          Some(line),
-          Some(self.process.color),
-          build_message_sender(
-            SenderType::Process,
-            Some(self.process.index),
-            Some(self.process.name.clone()),
-          ),
-        ))
-        .await
-        .expect("Couldnt send message to main thread");
+    let mut stdout_open = true;
+    let mut stderr_open = true;
+
+    loop {
+      if !stdout_open && !stderr_open {
+        break;
+      }
+
+      tokio::select! {
+        result = stdout_reader.next_line(), if stdout_open => {
+          match result {
+            Ok(Some(line)) => {
+              self
+                .message_tx
+                .send_async(Message::new(
+                  MessageType::Text,
+                  Some(self.process.name.clone()),
+                  Some(line),
+                  Some(self.process.color),
+                  build_message_sender(
+                    SenderType::Process,
+                    Some(self.process.index),
+                    Some(self.process.name.clone()),
+                  ),
+                ))
+                .await
+                .expect("Couldnt send message to main thread");
+            }
+            Ok(None) => stdout_open = false,
+            Err(_) => stdout_open = false,
+          }
+        }
+        result = stderr_reader.next_line(), if stderr_open => {
+          match result {
+            Ok(Some(line)) => {
+              self
+                .message_tx
+                .send_async(Message::new(
+                  MessageType::Text,
+                  Some(self.process.name.clone()),
+                  Some(line),
+                  Some(self.process.color),
+                  build_message_sender(
+                    SenderType::Process,
+                    Some(self.process.index),
+                    Some(self.process.name.clone()),
+                  ),
+                ))
+                .await
+                .expect("Couldnt send message to main thread");
+            }
+            Ok(None) => stderr_open = false,
+            Err(_) => stderr_open = false,
+          }
+        }
+      }
     }
     let status = handle.await.unwrap();
     let code = status.code().unwrap_or(-1);

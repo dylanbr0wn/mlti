@@ -44,6 +44,7 @@ impl Process {
   pub fn run(&self) -> Result<Child, std::io::Error> {
     let mut cmd = tokio::process::Command::new(self.cmd.clone());
     cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
     cmd.args(self.args.clone());
 
     cmd.spawn()
