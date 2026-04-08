@@ -98,6 +98,10 @@ pub struct Commands {
   #[argh(option, short = 't', default = "default_timestamp_format()")]
   timestamp_format: String,
 
+  /// pad all prefixes to the same width to align output columns
+  #[argh(switch)]
+  pad_prefix: bool,
+
   /// success condition: all, first, last, command-{{index|name}}, !command-{{index|name}}
   #[argh(option, short = 's', default = "default_success()")]
   success: String,
@@ -120,6 +124,7 @@ pub struct MltiConfig {
   pub no_color: bool,
   pub group: bool,
   pub timestamp_format: String,
+  pub pad_prefix: bool,
   pub timings: bool,
 }
 
@@ -228,6 +233,7 @@ impl CommandParser {
         raw,
         no_color,
         timestamp_format,
+        pad_prefix: commands.pad_prefix,
         timings: commands.timings,
       },
     })
@@ -472,6 +478,7 @@ async fn main() -> Result<()> {
     scheduler_clone.run().await;
   });
 
+  let mut processes: Vec<Process> = Vec::with_capacity(arg_parser.len());
   for i in 0..arg_parser.len() {
     let r = rng.gen_range(75..255);
     let g = rng.gen_range(75..255);
@@ -487,7 +494,17 @@ async fn main() -> Result<()> {
       (r, g, b),
       mlti_config.timestamp_format.clone(),
     );
+    processes.push(my_cmd);
+  }
 
+  if mlti_config.pad_prefix {
+    let max_len = processes.iter().map(|p| p.name.len()).max().unwrap_or(0);
+    for p in processes.iter_mut() {
+      p.name = format!("{:<width$}", p.name, width = max_len);
+    }
+  }
+
+  for my_cmd in processes {
     task_queue
       .send_async(Task::new(
         my_cmd,
