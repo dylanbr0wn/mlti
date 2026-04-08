@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use flume::{Receiver, Sender};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 
 use crate::message::{build_message_sender, MessageType, SenderType};
@@ -16,6 +16,7 @@ pub(crate) struct Scheduler {
   number_of_tasks: i32,
   kill_all_tx: Sender<()>,
   kill_all_rx: Receiver<()>,
+  exit_codes: Arc<Mutex<Vec<i32>>>,
 }
 
 impl Scheduler {
@@ -36,6 +37,7 @@ impl Scheduler {
       number_of_tasks,
       kill_all_tx,
       kill_all_rx,
+      exit_codes: Arc::new(Mutex::new(Vec::new())),
     }
   }
   pub fn get_task_queue(&self) -> Sender<Task> {
@@ -43,6 +45,10 @@ impl Scheduler {
   }
   pub fn get_kill_all(&self) -> Sender<()> {
     self.kill_all_tx.clone()
+  }
+
+  pub async fn get_exit_codes(&self) -> Vec<i32> {
+    self.exit_codes.lock().await.clone()
   }
 
   pub async fn run(&self) {
@@ -63,11 +69,15 @@ impl Scheduler {
           let task = self.tasks_rx.recv_async().await.ok();
           if let Some(mut task) = task {
             *running_processes += 1;
+            let exit_codes = self.exit_codes.clone();
             join_set.spawn(async move {
               match task.start().await {
-                Ok(_code) => {}
+                Ok(code) => {
+                  exit_codes.lock().await.push(code);
+                }
                 Err(e) => {
                   println!("{}", e);
+                  exit_codes.lock().await.push(1);
                 }
               }
             });

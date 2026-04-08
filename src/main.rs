@@ -264,11 +264,11 @@ async fn main() -> Result<()> {
     mlti_config.no_color,
   );
 
-  let scheduler = scheduler::Scheduler::new(
+  let scheduler = std::sync::Arc::new(scheduler::Scheduler::new(
     shutdown_tx.clone(),
     mlti_config.max_processes,
     arg_parser.len() as i32,
-  );
+  ));
 
   // let mut unnamed_counter = -1;
 
@@ -277,9 +277,10 @@ async fn main() -> Result<()> {
   // let mut tasks: Vec<Task> = vec![];
   let task_queue = scheduler.get_task_queue();
   let kill_all = scheduler.get_kill_all();
+  let scheduler_clone = scheduler.clone();
 
   let scheduler_handler = tokio::spawn(async move {
-    scheduler.run().await;
+    scheduler_clone.run().await;
   });
 
   for i in 0..arg_parser.len() {
@@ -411,6 +412,10 @@ async fn main() -> Result<()> {
     .await;
   messenger_handle.await.ok();
   scheduler_handler.await.ok();
+
+  let exit_codes = scheduler.get_exit_codes().await;
+  let first_non_zero = exit_codes.iter().find(|&&code| code != 0).copied();
+
   print_message(
     SenderType::Main,
     "".into(),
@@ -419,5 +424,10 @@ async fn main() -> Result<()> {
     mlti_config.raw,
     mlti_config.no_color,
   );
+
+  if let Some(code) = first_non_zero {
+    std::process::exit(code);
+  }
+
   Ok(())
 }
