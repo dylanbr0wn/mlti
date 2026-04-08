@@ -127,25 +127,85 @@ pub struct CommandParser {
   success_condition: SuccessCondition,
 }
 
+/// Parse a boolean from an environment variable value.
+/// Treats "true" and "1" (case-insensitive) as true, everything else as false.
+fn env_bool(key: &str) -> Option<bool> {
+  std::env::var(key).ok().map(|v| {
+    let v = v.to_lowercase();
+    v == "true" || v == "1"
+  })
+}
+
+/// Read an environment variable and parse it, returning None on missing or invalid values.
+fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
+  std::env::var(key).ok().and_then(|v| v.parse::<T>().ok())
+}
+
 impl CommandParser {
   pub fn new(commands: Commands) -> Result<Self, String> {
     let success_condition = SuccessCondition::parse(&commands.success)?;
+
+    // For boolean switches: CLI true means explicitly set; otherwise fall back to env var.
+    let kill_others =
+      commands.kill_others || env_bool("MLTI_KILL_OTHERS").unwrap_or(false);
+    let kill_others_on_fail = commands.kill_others_on_fail
+      || env_bool("MLTI_KILL_OTHERS_ON_FAIL").unwrap_or(false);
+    let raw = commands.raw || env_bool("MLTI_RAW").unwrap_or(false);
+    let no_color = commands.no_color || env_bool("MLTI_NO_COLOR").unwrap_or(false);
+    let group = commands.group || env_bool("MLTI_GROUP").unwrap_or(false);
+
+    // For options with defaults: if CLI value equals the default, try the env var.
+    let restart_tries = if commands.restart_tries != default_restart_tries() {
+      commands.restart_tries
+    } else {
+      env_parse::<i64>("MLTI_RESTART_TRIES").unwrap_or(commands.restart_tries)
+    };
+
+    let restart_after = if commands.restart_after != default_restart_after() {
+      commands.restart_after
+    } else {
+      env_parse::<i64>("MLTI_RESTART_AFTER").unwrap_or(commands.restart_after)
+    };
+
+    let prefix_length = if commands.prefix_length != default_prefix_length() {
+      commands.prefix_length
+    } else {
+      env_parse::<i16>("MLTI_PREFIX_LENGTH").unwrap_or(commands.prefix_length)
+    };
+
+    // For Option<String> fields: CLI Some wins; otherwise try env var.
+    let prefix = commands
+      .prefix
+      .or_else(|| std::env::var("MLTI_PREFIX").ok());
+    let names = commands.names.or_else(|| std::env::var("MLTI_NAMES").ok());
+    let max_processes = commands
+      .max_processes
+      .or_else(|| std::env::var("MLTI_MAX_PROCESSES").ok());
+
+    // For timestamp_format: if CLI value equals the default, try the env var.
+    let default_ts = String::from("%Y-%m-%d %H:%M:%S");
+    let timestamp_format = if commands.timestamp_format != default_ts {
+      commands.timestamp_format
+    } else {
+      std::env::var("MLTI_TIMESTAMP_FORMAT").unwrap_or(commands.timestamp_format)
+    };
+
     Ok(Self {
-      names: parse_names(commands.names, commands.names_seperator),
+      names: parse_names(names, commands.names_seperator),
       processes: commands.processes,
       success_condition,
       mlti_config: MltiConfig {
-        group: commands.group,
-        kill_others: commands.kill_others,
-        kill_others_on_fail: commands.kill_others_on_fail,
-        restart_tries: commands.restart_tries,
-        restart_after: commands.restart_after,
-        prefix: commands.prefix,
-        prefix_length: commands.prefix_length,
-        max_processes: parse_max_processes(commands.max_processes),
-        raw: commands.raw,
-        no_color: commands.no_color,
-        timestamp_format: commands.timestamp_format,
+        group,
+        kill_others,
+        kill_others_on_fail,
+        restart_tries,
+        restart_after,
+        prefix,
+        prefix_length,
+        max_processes: parse_max_processes(max_processes),
+        raw,
+        no_color,
+        timestamp_format,
         timings: commands.timings,
       },
     })
