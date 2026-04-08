@@ -52,7 +52,7 @@ fn npm_expander(cmd: &str) -> String {
   cmd.replace("npm:", "npm run ")
 }
 fn pnpm_expander(cmd: &str) -> String {
-  cmd.replace("pnpm:", "pnpm ")
+  cmd.replace("pnpm:", "pnpm run ")
 }
 
 pub fn expand(cmd: &str) -> String {
