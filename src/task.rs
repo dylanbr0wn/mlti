@@ -33,6 +33,9 @@ impl Task {
       exit_code: None,
     }
   }
+  pub fn index(&self) -> usize {
+    self.process.index
+  }
   pub async fn send_error(&self, error: String) {
     self
       .shutdown_tx
