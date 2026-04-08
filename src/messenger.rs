@@ -11,10 +11,17 @@ pub struct Messenger {
   no_color: bool,
   group: bool,
   message_queue: Vec<VecDeque<Message>>,
+  hide_list: Vec<String>,
 }
 
 impl Messenger {
-  pub fn new(raw: bool, no_color: bool, num_commands: usize, group: bool) -> Self {
+  pub fn new(
+    raw: bool,
+    no_color: bool,
+    num_commands: usize,
+    group: bool,
+    hide_list: Vec<String>,
+  ) -> Self {
     let (sender, receiver) = flume::unbounded::<Message>();
 
     let message_queues = (0..num_commands)
@@ -28,6 +35,7 @@ impl Messenger {
       no_color,
       group,
       message_queue: message_queues,
+      hide_list,
     }
   }
   pub fn get_sender(&self) -> Sender<Message> {
@@ -71,6 +79,15 @@ impl Messenger {
   pub fn flush(&mut self) {
     for queue in self.message_queue.iter_mut() {
       while let Some(message) = queue.pop_front() {
+        if self.hide_list.iter().any(|h| {
+          message
+            .sender
+            .index
+            .is_some_and(|idx| h == &idx.to_string())
+            || h == &message.name
+        }) {
+          continue;
+        }
         print_message(
           message.sender.type_,
           message.name,

@@ -85,6 +85,10 @@ pub struct Commands {
   #[argh(switch, short = 'g')]
   group: bool,
 
+  /// comma-separated list of process indices or names to hide output from
+  #[argh(option)]
+  hide: Option<String>,
+
   /// processes to run
   #[argh(positional)]
   processes: Vec<String>,
@@ -126,6 +130,7 @@ pub struct MltiConfig {
   pub timestamp_format: String,
   pub pad_prefix: bool,
   pub timings: bool,
+  pub hide_list: Vec<String>,
 }
 
 pub struct CommandParser {
@@ -235,6 +240,7 @@ impl CommandParser {
         timestamp_format,
         pad_prefix: commands.pad_prefix,
         timings: commands.timings,
+        hide_list: parse_hide_list(commands.hide),
       },
     })
   }
@@ -358,6 +364,17 @@ pub fn parse_names(names: Option<String>, seperator: String) -> Vec<String> {
   names
 }
 
+pub fn parse_hide_list(hide: Option<String>) -> Vec<String> {
+  match hide {
+    Some(h) => h
+      .split(',')
+      .map(|s| s.trim().to_string())
+      .filter(|s| !s.is_empty())
+      .collect(),
+    None => vec![],
+  }
+}
+
 pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
   match max_processes {
     Some(max) => {
@@ -391,6 +408,7 @@ async fn main() -> Result<()> {
     mlti_config.no_color,
     arg_parser.len(),
     false,
+    vec![],
   );
   let shutdown_tx = shutdown_messenger.get_sender();
   let mut messenger = messenger::Messenger::new(
@@ -398,33 +416,33 @@ async fn main() -> Result<()> {
     mlti_config.no_color,
     arg_parser.len(),
     mlti_config.group,
+    mlti_config.hide_list.clone(),
   );
   let message_tx = messenger.get_sender();
 
+  let hide_list = mlti_config.hide_list.clone();
   let messenger_handle = tokio::spawn(async move {
     messenger
       .listen(
         |message: Message, raw: bool, no_color: bool| match message.type_ {
-          MessageType::Error => {
-            print_message(
-              message.sender.type_,
-              message.name,
-              message.data,
-              message.style,
-              raw,
-              no_color,
-            );
-            0
-          }
-          MessageType::Text => {
-            print_message(
-              message.sender.type_,
-              message.name,
-              message.data,
-              message.style,
-              raw,
-              no_color,
-            );
+          MessageType::Error | MessageType::Text => {
+            let hidden = if let Some(idx) = message.sender.index {
+              hide_list
+                .iter()
+                .any(|h| h == &idx.to_string() || h == &message.name)
+            } else {
+              false
+            };
+            if !hidden {
+              print_message(
+                message.sender.type_,
+                message.name,
+                message.data,
+                message.style,
+                raw,
+                no_color,
+              );
+            }
             0
           }
           MessageType::Kill => 1,
