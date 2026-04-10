@@ -20,7 +20,7 @@ impl Process {
     prefix: Option<String>,
     length: i16,
     color: (u8, u8, u8),
-    timestamp_format: String
+    timestamp_format: String,
   ) -> Self {
     let parsed_cmd = parse(&raw_cmd).unwrap();
 
@@ -83,7 +83,7 @@ fn get_name(
   index: usize,
   prefix: Option<String>,
   length: i16,
-  timestamp_format: String
+  timestamp_format: String,
 ) -> String {
   // if Prefix template parse it
 
@@ -94,7 +94,10 @@ fn get_name(
       ("command", raw_cmd.to_string()),
       ("name", (&raw_cmd).to_string()),
       ("pid", process::id().to_string()),
-      ("time", chrono::Local::now().format(&timestamp_format).to_string()),
+      (
+        "time",
+        chrono::Local::now().format(&timestamp_format).to_string(),
+      ),
       ("none", "".to_string()),
     ];
 

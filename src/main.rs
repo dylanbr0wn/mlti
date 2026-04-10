@@ -4,10 +4,8 @@ use owo_colors::Style;
 use rand::Rng;
 
 use anyhow::Result;
-use task::Task;
 use argh::FromArgs;
-
-use std::i32::MAX;
+use task::Task;
 
 use crate::{message::SenderType, messenger::print_message};
 
@@ -18,83 +16,82 @@ mod scheduler;
 mod task;
 
 fn default_restart_tries() -> i64 {
-    0
+  0
 }
 fn default_restart_after() -> i64 {
-    0
+  0
 }
 fn default_prefix_length() -> i16 {
-    10
+  10
 }
 fn default_names_separator() -> String {
-    ",".to_string()
+  ",".to_string()
 }
-
 
 #[derive(FromArgs)]
 /// Launch some commands concurrently
 pub struct Commands {
-    /// names of processes
-    #[argh(option, short = 'n')]
-    names: Option<String>,
+  /// names of processes
+  #[argh(option, short = 'n')]
+  names: Option<String>,
 
-    /// name seperator character
-    #[argh(option, default="default_names_separator()")]
-    names_seperator: String,
+  /// name seperator character
+  #[argh(option, default = "default_names_separator()")]
+  names_seperator: String,
 
-    /// kill other processes if one exits.
-    #[argh(switch, short = 'k')]
-    kill_others: bool,
+  /// kill other processes if one exits.
+  #[argh(switch, short = 'k')]
+  kill_others: bool,
 
-    /// kill other processes if one exits with a non-zero exit code.
-    #[argh(switch)]
-   kill_others_on_fail: bool,
+  /// kill other processes if one exits with a non-zero exit code.
+  #[argh(switch)]
+  kill_others_on_fail: bool,
 
-    /// how many times a process will attempt to restart.
-    #[argh(option, default="default_restart_tries()")]
-    restart_tries: i64,
+  /// how many times a process will attempt to restart.
+  #[argh(option, default = "default_restart_tries()")]
+  restart_tries: i64,
 
-    /// amount of time to delay between restart attempts.
-    #[argh(option, default="default_restart_after()")]
-    restart_after: i64,
+  /// amount of time to delay between restart attempts.
+  #[argh(option, default = "default_restart_after()")]
+  restart_after: i64,
 
-    /// prefixed used in logging for each process.
-    #[argh(option, short = 'p')]
-    prefix: Option<String>,
+  /// prefixed used in logging for each process.
+  #[argh(option, short = 'p')]
+  prefix: Option<String>,
 
-    /// max number of characters of prefix that are shown.
-    #[argh(option, short = 'l', default="default_prefix_length()")]
-    prefix_length: i16,
+  /// max number of characters of prefix that are shown.
+  #[argh(option, short = 'l', default = "default_prefix_length()")]
+  prefix_length: i16,
 
-    /// how many process should run at once.
-    #[argh(option, short = 'm')]
-    max_processes: Option<String>,
+  /// how many process should run at once.
+  #[argh(option, short = 'm')]
+  max_processes: Option<String>,
 
-    /// print raw output of process only.
-    #[argh(switch, short = 'r')]
-    raw: bool,
+  /// print raw output of process only.
+  #[argh(switch, short = 'r')]
+  raw: bool,
 
-    /// disable color output.
-    #[argh(switch)]
-    no_color: bool,
+  /// disable color output.
+  #[argh(switch)]
+  no_color: bool,
 
-    /// group outputs together as if processes where run sequentially.
-    #[argh(switch, short = 'g')]
-    group: bool,
+  /// group outputs together as if processes where run sequentially.
+  #[argh(switch, short = 'g')]
+  group: bool,
 
-    /// processes to run
-    #[argh(positional)]
-    processes: Vec<String>,
+  /// processes to run
+  #[argh(positional)]
+  processes: Vec<String>,
 
-    /// print version
-    #[argh(switch, short = 'v')]
-    version: bool,
+  /// print version
+  #[argh(switch, short = 'v')]
+  #[allow(dead_code)]
+  version: bool,
 
-    /// timestamp format for logging
-    #[argh(option, short = 't', default = "String::from(\"%Y-%m-%d %H:%M:%S\")")]
-    timestamp_format: String,
+  /// timestamp format for logging
+  #[argh(option, short = 't', default = "String::from(\"%Y-%m-%d %H:%M:%S\")")]
+  timestamp_format: String,
 }
-
 
 #[derive(Clone)]
 pub struct MltiConfig {
@@ -118,7 +115,7 @@ pub struct CommandParser {
 }
 
 impl CommandParser {
-  pub fn new(commands:Commands) -> Self {
+  pub fn new(commands: Commands) -> Self {
     Self {
       names: parse_names(commands.names, commands.names_seperator),
       processes: commands.processes,
@@ -128,10 +125,10 @@ impl CommandParser {
         kill_others_on_fail: commands.kill_others_on_fail,
         restart_tries: commands.restart_tries,
         restart_after: commands.restart_after,
-        prefix:   commands.prefix,
+        prefix: commands.prefix,
         prefix_length: commands.prefix_length,
         max_processes: parse_max_processes(commands.max_processes),
-        raw:    commands.raw,
+        raw: commands.raw,
         no_color: commands.no_color,
         timestamp_format: commands.timestamp_format,
       },
@@ -141,13 +138,15 @@ impl CommandParser {
   pub fn len(&self) -> usize {
     self.processes.len()
   }
+  pub fn is_empty(&self) -> bool {
+    self.processes.is_empty()
+  }
   pub fn get_mlti_config(&self) -> MltiConfig {
     self.mlti_config.clone()
   }
 }
 
 pub fn parse_names(names: Option<String>, seperator: String) -> Vec<String> {
-
   let names = match names {
     Some(names) => names.split(&seperator).map(|x| x.to_string()).collect(),
     None => vec![],
@@ -168,7 +167,7 @@ pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
         str::parse::<i32>(&max).expect("Could not parse max processes")
       }
     }
-    None => MAX, // fuck it why not
+    None => i32::MAX, // fuck it why not
   }
 }
 
@@ -242,7 +241,7 @@ async fn main() -> Result<()> {
   })
   .expect("Error setting Ctrl-C handler");
 
-  if arg_parser.len() == 0 {
+  if arg_parser.is_empty() {
     print_message(
       SenderType::Main,
       "".into(),

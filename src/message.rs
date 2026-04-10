@@ -15,6 +15,7 @@ pub enum MessageType {
 
 pub struct MessageSender {
   pub index: Option<usize>,
+  #[allow(dead_code)]
   pub name: String,
   pub type_: SenderType,
 }
@@ -29,6 +30,7 @@ pub enum SenderType {
 
 pub struct Message {
   pub name: String,
+  #[allow(dead_code)]
   pub timestamp: u64,
   pub data: String,
   pub style: Style,
