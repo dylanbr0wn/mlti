@@ -57,9 +57,25 @@ fn npm_expander(cmd: &str) -> String {
 fn pnpm_expander(cmd: &str) -> String {
   cmd.replace("pnpm:", "pnpm run ")
 }
+fn yarn_expander(cmd: &str) -> String {
+  cmd.replace("yarn:", "yarn run ")
+}
+fn bun_expander(cmd: &str) -> String {
+  cmd.replace("bun:", "bun run ")
+}
+fn node_expander(cmd: &str) -> String {
+  cmd.replace("node:", "node --run ")
+}
+fn deno_expander(cmd: &str) -> String {
+  cmd.replace("deno:", "deno task ")
+}
 
 pub fn expand(cmd: &str) -> String {
   let cmd = pnpm_expander(cmd);
+  let cmd = yarn_expander(&cmd);
+  let cmd = bun_expander(&cmd);
+  let cmd = node_expander(&cmd);
+  let cmd = deno_expander(&cmd);
   npm_expander(&cmd)
 }
 
@@ -117,24 +133,17 @@ fn get_name(
 
   // if not, check for a npm command.
 
-  let is_pnpm_cmd: bool = raw_cmd.contains("pnpm:");
-  let is_npm_cmd: bool = raw_cmd.starts_with("npm:");
-  let is_yarn_cmd: bool = raw_cmd.contains("yarn:");
+  let prefixes = ["pnpm:", "yarn:", "bun:", "node:", "deno:", "npm:"];
   let default_name = format!("{}", index);
 
-  let backup_name: &str;
+  let backup_name: String = prefixes
+    .iter()
+    .find(|p| raw_cmd.contains(**p))
+    .and_then(|p| raw_cmd.split(p).nth(1))
+    .unwrap_or(&default_name)
+    .to_string();
 
-  if is_pnpm_cmd {
-    backup_name = raw_cmd.split("pnpm:").collect::<Vec<&str>>()[1]
-  } else if is_yarn_cmd {
-    backup_name = raw_cmd.split("yarn:").collect::<Vec<&str>>()[1]
-  } else if is_npm_cmd {
-    backup_name = raw_cmd.split("npm:").collect::<Vec<&str>>()[1]
-  } else {
-    backup_name = &default_name;
-  }
-
-  backup_name.to_string()
+  backup_name
 }
 
 fn truncate(s: &str, max_chars: usize) -> &str {
