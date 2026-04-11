@@ -38,6 +38,9 @@ fn default_names_separator() -> String {
 fn default_success() -> String {
   "all".to_string()
 }
+fn default_timestamp_format() -> String {
+  String::from("%Y-%m-%d %H:%M:%S")
+}
 
 #[derive(FromArgs)]
 /// Launch some commands concurrently
@@ -90,6 +93,10 @@ pub struct Commands {
   #[argh(switch, short = 'g')]
   group: bool,
 
+  /// comma-separated list of process indices or names to hide output from
+  #[argh(option)]
+  hide: Option<String>,
+
   /// processes to run
   #[argh(positional)]
   processes: Vec<String>,
@@ -100,12 +107,20 @@ pub struct Commands {
   version: bool,
 
   /// timestamp format for logging
-  #[argh(option, short = 't', default = "String::from(\"%Y-%m-%d %H:%M:%S\")")]
+  #[argh(option, short = 't', default = "default_timestamp_format()")]
   timestamp_format: String,
+
+  /// pad all prefixes to the same width to align output columns
+  #[argh(switch)]
+  pad_prefix: bool,
 
   /// success condition: all, first, last, command-{{index|name}}, !command-{{index|name}}
   #[argh(option, short = 's', default = "default_success()")]
   success: String,
+
+  /// print a duration summary for each process after completion
+  #[argh(switch)]
+  timings: bool,
 
   /// enable stdin forwarding to child processes
   #[argh(switch, short = 'i')]
@@ -129,7 +144,29 @@ pub struct MltiConfig {
   pub no_color: bool,
   pub group: bool,
   pub timestamp_format: String,
+  pub pad_prefix: bool,
+  pub timings: bool,
+  pub hide_list: Vec<HideTarget>,
   pub handle_input: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HideTarget {
+  Index(usize),
+  Name(String),
+}
+
+impl HideTarget {
+  pub fn matches(&self, index: Option<usize>, name: &str) -> bool {
+    match self {
+      HideTarget::Index(i) => index == Some(*i),
+      HideTarget::Name(n) => n == name,
+    }
+  }
+}
+
+pub fn is_hidden_by(list: &[HideTarget], index: Option<usize>, name: &str) -> bool {
+  list.iter().any(|t| t.matches(index, name))
 }
 
 pub struct CommandParser {
@@ -140,28 +177,110 @@ pub struct CommandParser {
   success_condition: SuccessCondition,
 }
 
+/// Parse a boolean from an environment variable value.
+/// Treats "true" and "1" (case-insensitive) as true, everything else as false.
+/// Returns None if the variable is missing or empty.
+fn env_bool(key: &str) -> Option<bool> {
+  std::env::var(key).ok().filter(|v| !v.is_empty()).map(|v| {
+    let v = v.to_lowercase();
+    v == "true" || v == "1"
+  })
+}
+
+/// Read an environment variable and parse it, returning None on missing or invalid values.
+/// Prints a warning to stderr if the value is present but cannot be parsed.
+fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
+  match std::env::var(key) {
+    Ok(v) if v.is_empty() => None,
+    Ok(v) => match v.parse::<T>() {
+      Ok(parsed) => Some(parsed),
+      Err(_) => {
+        eprintln!("[mlti] warning: ignoring invalid value for {key}: {v:?}");
+        None
+      }
+    },
+    Err(_) => None,
+  }
+}
+
 impl CommandParser {
   pub fn new(commands: Commands) -> Result<Self, String> {
     let success_condition = SuccessCondition::parse(&commands.success)?;
     let handle_input =
       commands.handle_input || commands.default_input_target.is_some();
+
+    // For boolean switches: CLI true means explicitly set; otherwise fall back to env var.
+    let kill_others =
+      commands.kill_others || env_bool("MLTI_KILL_OTHERS").unwrap_or(false);
+    let kill_others_on_fail = commands.kill_others_on_fail
+      || env_bool("MLTI_KILL_OTHERS_ON_FAIL").unwrap_or(false);
+    let raw = commands.raw || env_bool("MLTI_RAW").unwrap_or(false);
+    let no_color = commands.no_color
+      || env_bool("MLTI_NO_COLOR").unwrap_or(false)
+      || std::env::var("NO_COLOR").is_ok_and(|v| !v.is_empty());
+    let group = commands.group || env_bool("MLTI_GROUP").unwrap_or(false);
+
+    // For options with defaults: if CLI value equals the default, try the env var.
+    let restart_tries = if commands.restart_tries != default_restart_tries() {
+      commands.restart_tries
+    } else {
+      env_parse::<i64>("MLTI_RESTART_TRIES").unwrap_or(commands.restart_tries)
+    };
+
+    let restart_after = if commands.restart_after != default_restart_after() {
+      commands.restart_after
+    } else {
+      env_parse::<i64>("MLTI_RESTART_AFTER").unwrap_or(commands.restart_after)
+    };
+
+    let prefix_length = if commands.prefix_length != default_prefix_length() {
+      commands.prefix_length
+    } else {
+      env_parse::<i16>("MLTI_PREFIX_LENGTH").unwrap_or(commands.prefix_length)
+    };
+
+    // For Option<String> fields: CLI Some wins; otherwise try env var.
+    let prefix = commands
+      .prefix
+      .or_else(|| std::env::var("MLTI_PREFIX").ok());
+    let names = commands.names.or_else(|| std::env::var("MLTI_NAMES").ok());
+    let names_separator = if commands.names_seperator != default_names_separator() {
+      commands.names_seperator
+    } else {
+      std::env::var("MLTI_NAMES_SEPARATOR").unwrap_or(commands.names_seperator)
+    };
+    let max_processes = commands
+      .max_processes
+      .or_else(|| std::env::var("MLTI_MAX_PROCESSES").ok());
+
+    // For timestamp_format: if CLI value equals the default, try the env var.
+    let timestamp_format = if commands.timestamp_format != default_timestamp_format()
+    {
+      commands.timestamp_format
+    } else {
+      std::env::var("MLTI_TIMESTAMP_FORMAT").unwrap_or(commands.timestamp_format)
+    };
+
     Ok(Self {
-      names: parse_names(commands.names, commands.names_seperator),
+      names: parse_names(names, names_separator),
       processes: commands.processes,
       default_input_target: commands.default_input_target,
       success_condition,
       mlti_config: MltiConfig {
-        group: commands.group,
-        kill_others: commands.kill_others,
-        kill_others_on_fail: commands.kill_others_on_fail,
-        restart_tries: commands.restart_tries,
-        restart_after: commands.restart_after,
-        prefix: commands.prefix,
-        prefix_length: commands.prefix_length,
-        max_processes: parse_max_processes(commands.max_processes),
-        raw: commands.raw,
-        no_color: commands.no_color,
-        timestamp_format: commands.timestamp_format,
+        group,
+        kill_others,
+        kill_others_on_fail,
+        restart_tries,
+        restart_after,
+        prefix,
+        prefix_length,
+        max_processes: parse_max_processes(max_processes),
+        raw,
+        no_color,
+        timestamp_format,
+        pad_prefix: commands.pad_prefix,
+        timings: commands.timings,
+        hide_list: parse_hide_list(commands.hide),
         handle_input,
       },
     })
@@ -267,12 +386,38 @@ impl SuccessCondition {
   }
 }
 
+fn pad_process_names(processes: &mut [Process]) {
+  let max_len = processes
+    .iter()
+    .map(|p| p.name.chars().count())
+    .max()
+    .unwrap_or(0);
+  for p in processes.iter_mut() {
+    p.name = format!("{:<width$}", p.name, width = max_len);
+  }
+}
+
 pub fn parse_names(names: Option<String>, seperator: String) -> Vec<String> {
   let names = match names {
     Some(names) => names.split(&seperator).map(|x| x.to_string()).collect(),
     None => vec![],
   };
   names
+}
+
+pub fn parse_hide_list(hide: Option<String>) -> Vec<HideTarget> {
+  match hide {
+    Some(h) => h
+      .split(',')
+      .map(|s| s.trim())
+      .filter(|s| !s.is_empty())
+      .map(|s| match s.parse::<usize>() {
+        Ok(i) => HideTarget::Index(i),
+        Err(_) => HideTarget::Name(s.to_string()),
+      })
+      .collect(),
+    None => vec![],
+  }
 }
 
 pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
@@ -328,6 +473,7 @@ async fn main() -> Result<()> {
     mlti_config.no_color,
     arg_parser.len(),
     false,
+    vec![],
   );
   let shutdown_tx = shutdown_messenger.get_sender();
   let mut messenger = messenger::Messenger::new(
@@ -335,33 +481,26 @@ async fn main() -> Result<()> {
     mlti_config.no_color,
     arg_parser.len(),
     mlti_config.group,
+    mlti_config.hide_list.clone(),
   );
   let message_tx = messenger.get_sender();
 
+  let hide_list = mlti_config.hide_list.clone();
   let messenger_handle = tokio::spawn(async move {
     messenger
       .listen(
         |message: Message, raw: bool, no_color: bool| match message.type_ {
-          MessageType::Error => {
-            print_message(
-              message.sender.type_,
-              message.name,
-              message.data,
-              message.style,
-              raw,
-              no_color,
-            );
-            0
-          }
-          MessageType::Text => {
-            print_message(
-              message.sender.type_,
-              message.name,
-              message.data,
-              message.style,
-              raw,
-              no_color,
-            );
+          MessageType::Error | MessageType::Text => {
+            if !is_hidden_by(&hide_list, message.sender.index, &message.name) {
+              print_message(
+                message.sender.type_,
+                message.name,
+                message.data,
+                message.style,
+                raw,
+                no_color,
+              );
+            }
             0
           }
           MessageType::Kill => 1,
@@ -442,6 +581,7 @@ async fn main() -> Result<()> {
     scheduler_clone.run().await;
   });
 
+  let mut processes: Vec<Process> = Vec::with_capacity(arg_parser.len());
   for i in 0..arg_parser.len() {
     let r = rng.gen_range(75..255);
     let g = rng.gen_range(75..255);
@@ -457,7 +597,14 @@ async fn main() -> Result<()> {
       (r, g, b),
       mlti_config.timestamp_format.clone(),
     );
+    processes.push(my_cmd);
+  }
 
+  if mlti_config.pad_prefix {
+    pad_process_names(&mut processes);
+  }
+
+  for my_cmd in processes {
     task_queue
       .send_async(Task::new(
         my_cmd,
@@ -599,6 +746,51 @@ async fn main() -> Result<()> {
   let exit_codes = scheduler.get_exit_codes().await;
   let exit_code = arg_parser.evaluate_exit_code(&exit_codes);
 
+  if mlti_config.timings {
+    let mut timings = scheduler.get_timings().await;
+    let total_processes = arg_parser.len();
+    timings.sort_by_key(|t| t.index);
+    print_message(
+      SenderType::Main,
+      "".into(),
+      "\nTimings:".into(),
+      bold_green_style,
+      mlti_config.raw,
+      mlti_config.no_color,
+    );
+    for t in &timings {
+      let style = if t.exit_code != 0 {
+        red_style
+      } else {
+        bold_green_style
+      };
+      print_message(
+        SenderType::Main,
+        "".into(),
+        format!(
+          "  [{}] {} \u{2014} {:.2}s",
+          t.index, t.raw_cmd, t.duration_secs
+        ),
+        style,
+        mlti_config.raw,
+        mlti_config.no_color,
+      );
+    }
+    if timings.len() < total_processes {
+      print_message(
+        SenderType::Main,
+        "".into(),
+        format!(
+          "  ({} process(es) killed before completion)",
+          total_processes - timings.len()
+        ),
+        red_style,
+        mlti_config.raw,
+        mlti_config.no_color,
+      );
+    }
+  }
+
   print_message(
     SenderType::Main,
     "".into(),
@@ -618,6 +810,76 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use command::Process;
+
+  // ---- pad_process_names ----
+
+  fn make_process(name: &str) -> Process {
+    Process::new(
+      "echo hello".to_string(),
+      Some(name.to_string()),
+      0,
+      None,
+      10,
+      (255, 255, 255),
+      "%Y-%m-%d %H:%M:%S".to_string(),
+    )
+  }
+
+  #[test]
+  fn pad_process_names_aligns_to_longest() {
+    let mut processes = vec![
+      make_process("api"),
+      make_process("frontend"),
+      make_process("db"),
+    ];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "api     ");
+    assert_eq!(processes[1].name, "frontend");
+    assert_eq!(processes[2].name, "db      ");
+    let widths: Vec<usize> =
+      processes.iter().map(|p| p.name.chars().count()).collect();
+    assert!(widths.windows(2).all(|w| w[0] == w[1]));
+  }
+
+  #[test]
+  fn pad_process_names_single_process() {
+    let mut processes = vec![make_process("solo")];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "solo");
+  }
+
+  #[test]
+  fn pad_process_names_empty_list() {
+    let mut processes: Vec<Process> = vec![];
+    pad_process_names(&mut processes);
+    assert!(processes.is_empty());
+  }
+
+  #[test]
+  fn pad_process_names_equal_length() {
+    let mut processes = vec![
+      make_process("aaa"),
+      make_process("bbb"),
+      make_process("ccc"),
+    ];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "aaa");
+    assert_eq!(processes[1].name, "bbb");
+    assert_eq!(processes[2].name, "ccc");
+  }
+
+  #[test]
+  fn pad_process_names_unicode_chars() {
+    let mut processes = vec![make_process("café"), make_process("db")];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "café");
+    assert_eq!(processes[1].name, "db  ");
+    assert_eq!(
+      processes[0].name.chars().count(),
+      processes[1].name.chars().count()
+    );
+  }
 
   // ---- SuccessCondition::parse ----
 
@@ -787,5 +1049,247 @@ mod tests {
         .evaluate(&exit_codes, &names),
       1
     );
+  }
+
+  // ── env_bool ────────────────────────────────────────────────────────────────
+
+  fn with_env_var<F: FnOnce()>(key: &str, value: &str, f: F) {
+    std::env::set_var(key, value);
+    f();
+    std::env::remove_var(key);
+  }
+
+  fn without_env_var<F: FnOnce()>(key: &str, f: F) {
+    std::env::remove_var(key);
+    f();
+  }
+
+  #[test]
+  fn env_bool_true_values() {
+    with_env_var("MLTI_TEST_BOOL_TRUE_LOWER", "true", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_TRUE_LOWER"), Some(true));
+    });
+    with_env_var("MLTI_TEST_BOOL_TRUE_UPPER", "TRUE", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_TRUE_UPPER"), Some(true));
+    });
+    with_env_var("MLTI_TEST_BOOL_TRUE_MIXED", "True", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_TRUE_MIXED"), Some(true));
+    });
+    with_env_var("MLTI_TEST_BOOL_ONE", "1", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_ONE"), Some(true));
+    });
+  }
+
+  #[test]
+  fn env_bool_false_values() {
+    with_env_var("MLTI_TEST_BOOL_FALSE_LOWER", "false", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_FALSE_LOWER"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_FALSE_UPPER", "FALSE", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_FALSE_UPPER"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_ZERO", "0", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_ZERO"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_NO", "no", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_NO"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_ANYTHING", "anything", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_ANYTHING"), Some(false));
+    });
+  }
+
+  #[test]
+  fn env_bool_empty_returns_none() {
+    with_env_var("MLTI_TEST_BOOL_EMPTY", "", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_EMPTY"), None);
+    });
+  }
+
+  #[test]
+  fn env_bool_missing_returns_none() {
+    without_env_var("MLTI_TEST_BOOL_MISSING_XYZ", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_MISSING_XYZ"), None);
+    });
+  }
+
+  // ── env_parse ────────────────────────────────────────────────────────────────
+
+  #[test]
+  fn env_parse_valid_i64() {
+    with_env_var("MLTI_TEST_PARSE_42", "42", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_42"), Some(42));
+    });
+  }
+
+  #[test]
+  fn env_parse_negative_i64() {
+    with_env_var("MLTI_TEST_PARSE_NEG5", "-5", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_NEG5"), Some(-5));
+    });
+  }
+
+  #[test]
+  fn env_parse_invalid_returns_none() {
+    with_env_var("MLTI_TEST_PARSE_INVALID", "notanumber", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_INVALID"), None);
+    });
+  }
+
+  #[test]
+  fn env_parse_empty_returns_none() {
+    with_env_var("MLTI_TEST_PARSE_EMPTY", "", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_EMPTY"), None);
+    });
+  }
+
+  #[test]
+  fn env_parse_missing_returns_none() {
+    without_env_var("MLTI_TEST_PARSE_MISSING_XYZ", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_MISSING_XYZ"), None);
+    });
+  }
+
+  // ── parse_names ──────────────────────────────────────────────────────────────
+
+  #[test]
+  fn parse_names_comma_separated() {
+    assert_eq!(
+      parse_names(Some("foo,bar,baz".to_string()), ",".to_string()),
+      vec!["foo", "bar", "baz"]
+    );
+  }
+
+  #[test]
+  fn parse_names_custom_separator() {
+    assert_eq!(
+      parse_names(Some("foo|bar".to_string()), "|".to_string()),
+      vec!["foo", "bar"]
+    );
+  }
+
+  #[test]
+  fn parse_names_none_returns_empty() {
+    assert_eq!(parse_names(None, ",".to_string()), Vec::<String>::new());
+  }
+
+  // ── parse_max_processes ──────────────────────────────────────────────────────
+
+  #[test]
+  fn parse_max_processes_none_returns_i32_max() {
+    assert_eq!(parse_max_processes(None), i32::MAX);
+  }
+
+  #[test]
+  fn parse_max_processes_numeric() {
+    assert_eq!(parse_max_processes(Some("4".to_string())), 4);
+  }
+
+  #[test]
+  fn parse_max_processes_percentage() {
+    let cpus = num_cpus::get();
+    let expected = (cpus as f32 * 0.5) as i32;
+    assert_eq!(parse_max_processes(Some("50%".to_string())), expected);
+  }
+
+  // -- default functions --
+
+  #[test]
+  fn default_timestamp_format_matches_expected() {
+    assert_eq!(default_timestamp_format(), "%Y-%m-%d %H:%M:%S");
+  }
+
+  // ---- parse_hide_list / HideTarget / is_hidden_by ----
+
+  #[test]
+  fn parse_hide_list_none_is_empty() {
+    assert_eq!(parse_hide_list(None), Vec::<HideTarget>::new());
+  }
+
+  #[test]
+  fn parse_hide_list_empty_string_is_empty() {
+    assert_eq!(parse_hide_list(Some("".into())), Vec::<HideTarget>::new());
+  }
+
+  #[test]
+  fn parse_hide_list_whitespace_and_commas_is_empty() {
+    assert_eq!(
+      parse_hide_list(Some("  ,  ,".into())),
+      Vec::<HideTarget>::new()
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_single_index() {
+    assert_eq!(
+      parse_hide_list(Some("0".into())),
+      vec![HideTarget::Index(0)]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_single_name() {
+    assert_eq!(
+      parse_hide_list(Some("foo".into())),
+      vec![HideTarget::Name("foo".into())]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_mixed_indices_and_names() {
+    assert_eq!(
+      parse_hide_list(Some("0,foo,2".into())),
+      vec![
+        HideTarget::Index(0),
+        HideTarget::Name("foo".into()),
+        HideTarget::Index(2),
+      ]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_trims_whitespace() {
+    assert_eq!(
+      parse_hide_list(Some(" 0 , foo ".into())),
+      vec![HideTarget::Index(0), HideTarget::Name("foo".into())]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_trailing_comma_ignored() {
+    assert_eq!(
+      parse_hide_list(Some("0,foo,".into())),
+      vec![HideTarget::Index(0), HideTarget::Name("foo".into())]
+    );
+  }
+
+  #[test]
+  fn hide_target_index_matches_only_by_index() {
+    let t = HideTarget::Index(1);
+    assert!(t.matches(Some(1), "anything"));
+    assert!(!t.matches(Some(0), "anything"));
+    assert!(!t.matches(None, "anything"));
+  }
+
+  #[test]
+  fn hide_target_name_matches_only_by_name() {
+    let t = HideTarget::Name("build".into());
+    assert!(t.matches(Some(5), "build"));
+    assert!(t.matches(None, "build"));
+    assert!(!t.matches(Some(5), "serve"));
+  }
+
+  #[test]
+  fn is_hidden_by_empty_list_hides_nothing() {
+    assert!(!is_hidden_by(&[], Some(0), "foo"));
+  }
+
+  #[test]
+  fn is_hidden_by_matches_any_entry() {
+    let list = vec![HideTarget::Index(0), HideTarget::Name("foo".into())];
+    assert!(is_hidden_by(&list, Some(0), "bar"));
+    assert!(is_hidden_by(&list, Some(2), "foo"));
+    assert!(!is_hidden_by(&list, Some(2), "bar"));
+    assert!(!is_hidden_by(&list, None, "bar"));
   }
 }

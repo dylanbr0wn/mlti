@@ -5,6 +5,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 
 use crate::message::{build_message_sender, MessageType, SenderType};
+use crate::task::TaskTiming;
 use crate::{message::Message, task::Task};
 
 pub(crate) struct Scheduler {
@@ -17,6 +18,7 @@ pub(crate) struct Scheduler {
   kill_all_tx: Sender<()>,
   kill_all_rx: Receiver<()>,
   exit_codes: Arc<Mutex<Vec<(usize, i32)>>>,
+  timings: Arc<Mutex<Vec<TaskTiming>>>,
 }
 
 impl Scheduler {
@@ -38,6 +40,7 @@ impl Scheduler {
       kill_all_tx,
       kill_all_rx,
       exit_codes: Arc::new(Mutex::new(Vec::new())),
+      timings: Arc::new(Mutex::new(Vec::new())),
     }
   }
   pub fn get_task_queue(&self) -> Sender<Task> {
@@ -49,6 +52,10 @@ impl Scheduler {
 
   pub async fn get_exit_codes(&self) -> Vec<(usize, i32)> {
     self.exit_codes.lock().await.clone()
+  }
+
+  pub async fn get_timings(&self) -> Vec<TaskTiming> {
+    self.timings.lock().await.clone()
   }
 
   pub async fn run(&self) {
@@ -70,15 +77,24 @@ impl Scheduler {
           if let Some(mut task) = task {
             *running_processes += 1;
             let exit_codes = self.exit_codes.clone();
+            let timings = self.timings.clone();
             let task_index = task.index();
+            let (_, task_raw_cmd) = task.process_info();
             join_set.spawn(async move {
               match task.start().await {
-                Ok(code) => {
+                Ok((code, timing)) => {
                   exit_codes.lock().await.push((task_index, code));
+                  timings.lock().await.push(timing);
                 }
                 Err(e) => {
                   println!("{}", e);
                   exit_codes.lock().await.push((task_index, 1));
+                  timings.lock().await.push(TaskTiming {
+                    index: task_index,
+                    raw_cmd: task_raw_cmd,
+                    exit_code: 1,
+                    duration_secs: 0.0,
+                  });
                 }
               }
             });
