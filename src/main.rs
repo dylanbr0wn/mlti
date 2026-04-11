@@ -30,6 +30,9 @@ fn default_names_separator() -> String {
 fn default_success() -> String {
   "all".to_string()
 }
+fn default_timestamp_format() -> String {
+  String::from("%Y-%m-%d %H:%M:%S")
+}
 
 #[derive(FromArgs)]
 /// Launch some commands concurrently
@@ -92,7 +95,7 @@ pub struct Commands {
   version: bool,
 
   /// timestamp format for logging
-  #[argh(option, short = 't', default = "String::from(\"%Y-%m-%d %H:%M:%S\")")]
+  #[argh(option, short = 't', default = "default_timestamp_format()")]
   timestamp_format: String,
 
   /// success condition: all, first, last, command-{{index|name}}, !command-{{index|name}}
@@ -129,16 +132,31 @@ pub struct CommandParser {
 
 /// Parse a boolean from an environment variable value.
 /// Treats "true" and "1" (case-insensitive) as true, everything else as false.
+/// Returns None if the variable is missing or empty.
 fn env_bool(key: &str) -> Option<bool> {
-  std::env::var(key).ok().map(|v| {
-    let v = v.to_lowercase();
-    v == "true" || v == "1"
-  })
+  std::env::var(key)
+    .ok()
+    .filter(|v| !v.is_empty())
+    .map(|v| {
+      let v = v.to_lowercase();
+      v == "true" || v == "1"
+    })
 }
 
 /// Read an environment variable and parse it, returning None on missing or invalid values.
+/// Prints a warning to stderr if the value is present but cannot be parsed.
 fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
-  std::env::var(key).ok().and_then(|v| v.parse::<T>().ok())
+  match std::env::var(key) {
+    Ok(v) if v.is_empty() => None,
+    Ok(v) => match v.parse::<T>() {
+      Ok(parsed) => Some(parsed),
+      Err(_) => {
+        eprintln!("[mlti] warning: ignoring invalid value for {key}: {v:?}");
+        None
+      }
+    },
+    Err(_) => None,
+  }
 }
 
 impl CommandParser {
@@ -151,7 +169,9 @@ impl CommandParser {
     let kill_others_on_fail = commands.kill_others_on_fail
       || env_bool("MLTI_KILL_OTHERS_ON_FAIL").unwrap_or(false);
     let raw = commands.raw || env_bool("MLTI_RAW").unwrap_or(false);
-    let no_color = commands.no_color || env_bool("MLTI_NO_COLOR").unwrap_or(false);
+    let no_color = commands.no_color
+      || env_bool("MLTI_NO_COLOR").unwrap_or(false)
+      || std::env::var("NO_COLOR").map_or(false, |v| !v.is_empty());
     let group = commands.group || env_bool("MLTI_GROUP").unwrap_or(false);
 
     // For options with defaults: if CLI value equals the default, try the env var.
@@ -178,20 +198,24 @@ impl CommandParser {
       .prefix
       .or_else(|| std::env::var("MLTI_PREFIX").ok());
     let names = commands.names.or_else(|| std::env::var("MLTI_NAMES").ok());
+    let names_separator = if commands.names_seperator != default_names_separator() {
+      commands.names_seperator
+    } else {
+      std::env::var("MLTI_NAMES_SEPARATOR").unwrap_or(commands.names_seperator)
+    };
     let max_processes = commands
       .max_processes
       .or_else(|| std::env::var("MLTI_MAX_PROCESSES").ok());
 
     // For timestamp_format: if CLI value equals the default, try the env var.
-    let default_ts = String::from("%Y-%m-%d %H:%M:%S");
-    let timestamp_format = if commands.timestamp_format != default_ts {
+    let timestamp_format = if commands.timestamp_format != default_timestamp_format() {
       commands.timestamp_format
     } else {
       std::env::var("MLTI_TIMESTAMP_FORMAT").unwrap_or(commands.timestamp_format)
     };
 
     Ok(Self {
-      names: parse_names(names, commands.names_seperator),
+      names: parse_names(names, names_separator),
       processes: commands.processes,
       success_condition,
       mlti_config: MltiConfig {
