@@ -3,12 +3,21 @@ use chrono::{Duration, Local};
 use chrono_humanize::{Accuracy, HumanTime, Tense};
 use flume::Sender;
 use owo_colors::OwoColorize;
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
 use crate::command::Process;
 use crate::message::{build_message_sender, Message, MessageType, SenderType};
 use crate::MltiConfig;
+
+#[derive(Clone)]
+pub struct TaskTiming {
+  pub index: usize,
+  pub raw_cmd: String,
+  pub exit_code: i32,
+  pub duration_secs: f64,
+}
 
 pub(crate) struct Task {
   process: Process,
@@ -36,6 +45,19 @@ impl Task {
   pub fn index(&self) -> usize {
     self.process.index
   }
+  pub fn process_info(&self) -> (usize, String) {
+    (self.process.index, self.process.raw_cmd.clone())
+  }
+
+  fn make_timing(&self, exit_code: i32, duration_secs: f64) -> TaskTiming {
+    TaskTiming {
+      index: self.process.index,
+      raw_cmd: self.process.raw_cmd.clone(),
+      exit_code,
+      duration_secs,
+    }
+  }
+
   pub async fn send_error(&self, error: String) {
     self
       .shutdown_tx
@@ -49,7 +71,7 @@ impl Task {
       .await
       .expect("Could not send message on channel.");
   }
-  pub async fn start(&mut self) -> Result<i32> {
+  pub async fn start(&mut self) -> Result<(i32, TaskTiming)> {
     let mut child: Option<Child> = None;
 
     let mut restart_attempts = self.mlti_config.restart_tries - 1;
@@ -107,9 +129,11 @@ impl Task {
             "Encountered an Error: Could not start process.".red(),
           ))
           .await;
-        return Ok(1);
+        return Ok((1, self.make_timing(1, 0.0)));
       }
     };
+
+    let start_time = Instant::now();
 
     let stdout = child
       .stdout
@@ -219,7 +243,11 @@ impl Task {
         .expect("Could not send message on channel.");
     }
 
-    Ok(self.exit_code.unwrap_or(1))
+    let code = self.exit_code.unwrap_or(1);
+    Ok((
+      code,
+      self.make_timing(code, start_time.elapsed().as_secs_f64()),
+    ))
   }
 }
 
