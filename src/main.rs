@@ -339,6 +339,17 @@ impl SuccessCondition {
   }
 }
 
+fn pad_process_names(processes: &mut [Process]) {
+  let max_len = processes
+    .iter()
+    .map(|p| p.name.chars().count())
+    .max()
+    .unwrap_or(0);
+  for p in processes.iter_mut() {
+    p.name = format!("{:<width$}", p.name, width = max_len);
+  }
+}
+
 pub fn parse_names(names: Option<String>, seperator: String) -> Vec<String> {
   let names = match names {
     Some(names) => names.split(&seperator).map(|x| x.to_string()).collect(),
@@ -498,10 +509,7 @@ async fn main() -> Result<()> {
   }
 
   if mlti_config.pad_prefix {
-    let max_len = processes.iter().map(|p| p.name.len()).max().unwrap_or(0);
-    for p in processes.iter_mut() {
-      p.name = format!("{:<width$}", p.name, width = max_len);
-    }
+    pad_process_names(&mut processes);
   }
 
   for my_cmd in processes {
@@ -686,6 +694,78 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use command::Process;
+
+  // ---- pad_process_names ----
+
+  fn make_process(name: &str) -> Process {
+    Process::new(
+      "echo hello".to_string(),
+      Some(name.to_string()),
+      0,
+      None,
+      10,
+      (255, 255, 255),
+      "%Y-%m-%d %H:%M:%S".to_string(),
+    )
+  }
+
+  #[test]
+  fn pad_process_names_aligns_to_longest() {
+    let mut processes = vec![
+      make_process("api"),
+      make_process("frontend"),
+      make_process("db"),
+    ];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "api     ");
+    assert_eq!(processes[1].name, "frontend");
+    assert_eq!(processes[2].name, "db      ");
+    let widths: Vec<usize> = processes.iter().map(|p| p.name.chars().count()).collect();
+    assert!(widths.windows(2).all(|w| w[0] == w[1]));
+  }
+
+  #[test]
+  fn pad_process_names_single_process() {
+    let mut processes = vec![make_process("solo")];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "solo");
+  }
+
+  #[test]
+  fn pad_process_names_empty_list() {
+    let mut processes: Vec<Process> = vec![];
+    pad_process_names(&mut processes);
+    assert!(processes.is_empty());
+  }
+
+  #[test]
+  fn pad_process_names_equal_length() {
+    let mut processes = vec![
+      make_process("aaa"),
+      make_process("bbb"),
+      make_process("ccc"),
+    ];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "aaa");
+    assert_eq!(processes[1].name, "bbb");
+    assert_eq!(processes[2].name, "ccc");
+  }
+
+  #[test]
+  fn pad_process_names_unicode_chars() {
+    let mut processes = vec![
+      make_process("café"),
+      make_process("db"),
+    ];
+    pad_process_names(&mut processes);
+    assert_eq!(processes[0].name, "café");
+    assert_eq!(processes[1].name, "db  ");
+    assert_eq!(
+      processes[0].name.chars().count(),
+      processes[1].name.chars().count()
+    );
+  }
 
   // ---- SuccessCondition::parse ----
 
