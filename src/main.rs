@@ -133,7 +133,6 @@ pub struct CommandParser {
 /// Parse a boolean from an environment variable value.
 /// Treats "true" and "1" (case-insensitive) as true, everything else as false.
 /// Returns None if the variable is missing or empty.
-#[cfg_attr(not(test), allow(dead_code))]
 fn env_bool(key: &str) -> Option<bool> {
   std::env::var(key).ok().filter(|v| !v.is_empty()).map(|v| {
     let v = v.to_lowercase();
@@ -143,7 +142,6 @@ fn env_bool(key: &str) -> Option<bool> {
 
 /// Read an environment variable and parse it, returning None on missing or invalid values.
 /// Prints a warning to stderr if the value is present but cannot be parsed.
-#[cfg_attr(not(test), allow(dead_code))]
 fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
   match std::env::var(key) {
     Ok(v) if v.is_empty() => None,
@@ -981,5 +979,12 @@ mod tests {
     let cpus = num_cpus::get();
     let expected = (cpus as f32 * 0.5) as i32;
     assert_eq!(parse_max_processes(Some("50%".to_string())), expected);
+  }
+
+  // -- default functions --
+
+  #[test]
+  fn default_timestamp_format_matches_expected() {
+    assert_eq!(default_timestamp_format(), "%Y-%m-%d %H:%M:%S");
   }
 }
