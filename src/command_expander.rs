@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use globset::GlobBuilder;
 use serde::Deserialize;
 
@@ -88,10 +88,11 @@ fn parse_wildcard(cmd: &str) -> Option<WildcardPattern> {
 
   let rest = &cmd[prefix.len()..];
 
-  // Split on first space to separate script pattern from trailing args
-  let (script_part, trailing) = match rest.find(' ') {
-    Some(idx) => (&rest[..idx], &rest[idx..]),
-    None => (rest, ""),
+  // Split on first space to separate script pattern from trailing args.
+  // Using split_once ensures we split at a char boundary (space is ASCII).
+  let (script_part, trailing): (&str, String) = match rest.split_once(' ') {
+    Some((s, t)) => (s, format!(" {}", t)),
+    None => (rest, String::new()),
   };
 
   if !script_part.contains('*') {
@@ -115,8 +116,19 @@ fn parse_wildcard(cmd: &str) -> Option<WildcardPattern> {
     runner_prefix: runner.to_string(),
     glob_pattern,
     exclusion,
-    trailing_args: trailing.to_string(),
+    trailing_args: trailing,
   })
+}
+
+/// Expand a non-wildcard package manager shortcut.
+/// e.g., "npm:build --verbose" → ("npm run build --verbose", "build")
+/// Returns None for non-shortcut commands.
+fn expand_shortcut(cmd: &str) -> Option<(String, String)> {
+  let (prefix, runner) = MANAGERS.iter().find(|(p, _)| cmd.starts_with(p))?;
+  let rest = &cmd[prefix.len()..];
+  let script_name = rest.split(' ').next().unwrap_or(rest);
+  let expanded = format!("{}{}", runner, rest);
+  Some((expanded, script_name.to_string()))
 }
 
 #[derive(Deserialize)]
@@ -125,16 +137,23 @@ struct PackageJson {
   scripts: HashMap<String, String>,
 }
 
-/// Expand wildcard patterns in process commands.
+/// Expand wildcard patterns and package manager shortcuts in process commands.
 /// Returns expanded (processes, names) vectors.
 /// Names are `Some(name)` for explicitly named or auto-named positions,
 /// `None` for positions with no name.
+///
+/// All shortcut expansion happens here — both wildcard (`npm:build:*`) and
+/// non-wildcard (`npm:build`) forms. Downstream code sees only plain commands.
 pub fn expand_commands(
   processes: Vec<String>,
   names: Vec<String>,
   manifest_path: Option<String>,
 ) -> Result<(Vec<String>, Vec<Option<String>>)> {
-  let has_wildcards = processes.iter().any(|p| parse_wildcard(p).is_some());
+  // Pre-parse all patterns in a single pass to avoid re-parsing in the loop.
+  let parsed: Vec<Option<WildcardPattern>> =
+    processes.iter().map(|p| parse_wildcard(p)).collect();
+
+  let has_wildcards = parsed.iter().any(|p| p.is_some());
 
   let scripts = if has_wildcards {
     Some(read_manifest(manifest_path.as_deref())?)
@@ -146,8 +165,23 @@ pub fn expand_commands(
   let mut expanded_names: Vec<Option<String>> = Vec::new();
   let mut name_idx = 0;
 
-  for process in &processes {
-    if let Some(pattern) = parse_wildcard(process) {
+  for (process, pattern) in processes.iter().zip(parsed.into_iter()) {
+    if let Some(pattern) = pattern {
+      // Validate exclusion content: only simple script-name characters allowed.
+      // Rejects things like *(!fix|ts) which would produce a malformed glob.
+      if let Some(ref excl) = pattern.exclusion {
+        if !excl
+          .chars()
+          .all(|c| c.is_alphanumeric() || matches!(c, ':' | '-' | '_' | '.' | '@'))
+        {
+          bail!(
+            "Invalid exclusion pattern '(!{})': exclusion must contain only \
+             alphanumeric characters, colons, hyphens, underscores, dots, or @",
+            excl
+          );
+        }
+      }
+
       let scripts = scripts.as_ref().unwrap();
       let matches = match_scripts(&pattern, scripts)?;
 
@@ -172,7 +206,18 @@ pub fn expand_commands(
         expanded_names.push(name);
         name_idx += 1;
       }
+    } else if let Some((expanded, auto_name)) = expand_shortcut(process) {
+      // Non-wildcard shortcut (e.g., "npm:build" → "npm run build")
+      expanded_processes.push(expanded);
+      let name = if name_idx < names.len() {
+        Some(names[name_idx].clone())
+      } else {
+        Some(auto_name)
+      };
+      expanded_names.push(name);
+      name_idx += 1;
     } else {
+      // Plain command — pass through unchanged
       expanded_processes.push(process.clone());
       let name = if name_idx < names.len() {
         Some(names[name_idx].clone())
@@ -181,6 +226,23 @@ pub fn expand_commands(
       };
       expanded_names.push(name);
       name_idx += 1;
+    }
+  }
+
+  // Warn about duplicate names that could cause confusion with
+  // --success command-<name> (which matches the first occurrence).
+  let mut seen: HashMap<&str, usize> = HashMap::new();
+  for (i, name) in expanded_names.iter().enumerate() {
+    if let Some(n) = name.as_deref() {
+      if let Some(&prev_idx) = seen.get(n) {
+        eprintln!(
+          "Warning: duplicate process name '{}' at positions {} and {}; \
+           --success command-{} will match position {}",
+          n, prev_idx, i, n, prev_idx
+        );
+      } else {
+        seen.insert(n, i);
+      }
     }
   }
 
@@ -552,5 +614,137 @@ mod tests {
     assert!(result.is_err());
     let msg = format!("{}", result.unwrap_err());
     assert!(msg.contains("Invalid JSON"));
+  }
+
+  // ---- expand_shortcut ----
+
+  #[test]
+  fn expand_shortcut_npm() {
+    let (cmd, name) = expand_shortcut("npm:build").unwrap();
+    assert_eq!(cmd, "npm run build");
+    assert_eq!(name, "build");
+  }
+
+  #[test]
+  fn expand_shortcut_pnpm_with_trailing_args() {
+    let (cmd, name) = expand_shortcut("pnpm:test --watch").unwrap();
+    assert_eq!(cmd, "pnpm run test --watch");
+    assert_eq!(name, "test");
+  }
+
+  #[test]
+  fn expand_shortcut_yarn() {
+    let (cmd, name) = expand_shortcut("yarn:lint").unwrap();
+    assert_eq!(cmd, "yarn run lint");
+    assert_eq!(name, "lint");
+  }
+
+  #[test]
+  fn expand_shortcut_bun() {
+    let (cmd, name) = expand_shortcut("bun:dev").unwrap();
+    assert_eq!(cmd, "bun run dev");
+    assert_eq!(name, "dev");
+  }
+
+  #[test]
+  fn expand_shortcut_plain_command_returns_none() {
+    assert!(expand_shortcut("echo hello").is_none());
+  }
+
+  // ---- non-wildcard shortcut expansion via expand_commands ----
+
+  #[test]
+  fn expand_non_wildcard_shortcut() {
+    let processes = vec!["npm:build".into()];
+    let names = vec![];
+    let (procs, nms) = expand_commands(processes, names, None).unwrap();
+    assert_eq!(procs, vec!["npm run build"]);
+    assert_eq!(nms, vec![Some("build".into())]);
+  }
+
+  #[test]
+  fn expand_non_wildcard_shortcut_with_explicit_name() {
+    let processes = vec!["npm:build".into()];
+    let names = vec!["builder".into()];
+    let (procs, nms) = expand_commands(processes, names, None).unwrap();
+    assert_eq!(procs, vec!["npm run build"]);
+    assert_eq!(nms, vec![Some("builder".into())]);
+  }
+
+  #[test]
+  fn expand_non_wildcard_all_managers() {
+    let processes = vec![
+      "npm:build".into(),
+      "pnpm:test".into(),
+      "yarn:lint".into(),
+      "bun:dev".into(),
+    ];
+    let names = vec![];
+    let (procs, nms) = expand_commands(processes, names, None).unwrap();
+    assert_eq!(
+      procs,
+      vec![
+        "npm run build",
+        "pnpm run test",
+        "yarn run lint",
+        "bun run dev",
+      ]
+    );
+    assert_eq!(
+      nms,
+      vec![
+        Some("build".into()),
+        Some("test".into()),
+        Some("lint".into()),
+        Some("dev".into()),
+      ]
+    );
+  }
+
+  #[test]
+  fn expand_non_wildcard_shortcut_with_trailing_args() {
+    let processes = vec!["npm:build --verbose".into()];
+    let names = vec![];
+    let (procs, nms) = expand_commands(processes, names, None).unwrap();
+    assert_eq!(procs, vec!["npm run build --verbose"]);
+    assert_eq!(nms, vec![Some("build".into())]);
+  }
+
+  // ---- exclusion validation ----
+
+  #[test]
+  fn expand_rejects_invalid_exclusion_chars() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = write_test_manifest(&dir);
+    // Pipe character is not valid in exclusion
+    let processes = vec!["npm:lint:*(!fix|ts)".into()];
+    let result = expand_commands(processes, vec![], Some(manifest));
+    assert!(result.is_err());
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("Invalid exclusion pattern"));
+  }
+
+  #[test]
+  fn expand_allows_valid_exclusion_chars() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = write_test_manifest(&dir);
+    // Colons, hyphens, underscores, dots, @ are all valid
+    let processes = vec!["npm:lint:*(!fix)".into()];
+    let (procs, _) = expand_commands(processes, vec![], Some(manifest)).unwrap();
+    // Should match lint:js and lint:ts, excluding lint:fix
+    assert_eq!(procs.len(), 2);
+  }
+
+  // ---- exclusion also excludes transitive matches ----
+
+  #[test]
+  fn match_scripts_exclusion_also_excludes_nested() {
+    // lint:*(!fix) should exclude both lint:fix AND lint:fix:js
+    let pattern = parse_wildcard("npm:lint:*(!fix)").unwrap();
+    let matches = match_scripts(&pattern, &test_scripts()).unwrap();
+    let commands: Vec<&str> = matches.iter().map(|m| m.command.as_str()).collect();
+    assert!(!commands.iter().any(|c| c.contains("lint:fix")));
+    assert!(commands.iter().any(|c| c.contains("lint:js")));
+    assert!(commands.iter().any(|c| c.contains("lint:ts")));
   }
 }

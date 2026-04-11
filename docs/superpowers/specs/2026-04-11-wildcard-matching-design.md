@@ -26,7 +26,7 @@ Expand wildcard patterns in package manager shortcuts (e.g., `npm:build:*`) by r
 
 ### Approach: Pre-processor before CommandParser
 
-A new `src/command_expander.rs` module runs before `CommandParser::new()`. It takes the raw process list and names list, detects wildcard patterns, reads `package.json`, expands wildcards into concrete command strings, and returns expanded vectors. `CommandParser` and everything downstream sees only normal command strings — no changes needed.
+A new `src/command_expander.rs` module runs before `CommandParser::new()`. It takes the raw process list and names list, detects wildcard patterns, reads `package.json`, expands wildcards into concrete command strings, and returns expanded vectors. It also expands non-wildcard shortcuts (e.g., `npm:build` → `npm run build`), consolidating all shortcut expansion in one place. `CommandParser` and everything downstream sees only plain commands — no changes needed.
 
 ### Public API
 
@@ -35,8 +35,10 @@ pub fn expand_commands(
     processes: Vec<String>,
     names: Vec<String>,
     manifest_path: Option<String>,
-) -> Result<(Vec<String>, Vec<String>)>
+) -> Result<(Vec<String>, Vec<Option<String>>)>
 ```
+
+Names are `Some(name)` for explicitly named or auto-named positions, `None` for plain commands with no name.
 
 ### Integration point in main.rs
 

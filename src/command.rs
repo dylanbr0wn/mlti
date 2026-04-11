@@ -1,6 +1,5 @@
 use std::process::{self, Stdio};
 
-use anyhow::Result;
 use tokio::process::Child;
 
 pub(crate) struct Process {
@@ -22,12 +21,9 @@ impl Process {
     color: (u8, u8, u8),
     timestamp_format: String,
   ) -> Self {
-    let parsed_cmd = parse(&raw_cmd).unwrap();
-
-    let mut args = parsed_cmd.split_whitespace();
-
+    // Commands are already expanded by command_expander before reaching here.
+    let mut args = raw_cmd.split_whitespace();
     let cmd_string = args.next().unwrap_or("");
-
     let args = args.map(|x| x.to_string()).collect::<Vec<String>>();
 
     let name = get_name(&raw_cmd, name, index, prefix, length, timestamp_format);
@@ -49,23 +45,6 @@ impl Process {
 
     cmd.spawn()
   }
-}
-
-fn npm_expander(cmd: &str) -> String {
-  cmd.replace("npm:", "npm run ")
-}
-fn pnpm_expander(cmd: &str) -> String {
-  cmd.replace("pnpm:", "pnpm run ")
-}
-
-pub fn expand(cmd: &str) -> String {
-  let cmd = pnpm_expander(cmd);
-  npm_expander(&cmd)
-}
-
-pub fn parse(raw_cmd: &str) -> Result<String> {
-  let parts = expand(raw_cmd);
-  Ok(parts)
 }
 
 fn replace_prefix(prefix: String, key: String, value: String) -> String {
@@ -109,32 +88,14 @@ fn get_name(
     return prefix.to_string();
   }
 
-  // if explicitly named, use that
+  // if explicitly named, use that (includes auto-names from command_expander)
 
   if let Some(name) = name {
     return name;
   }
 
-  // if not, check for a npm command.
-
-  let is_pnpm_cmd: bool = raw_cmd.contains("pnpm:");
-  let is_npm_cmd: bool = raw_cmd.starts_with("npm:");
-  let is_yarn_cmd: bool = raw_cmd.contains("yarn:");
-  let default_name = format!("{}", index);
-
-  let backup_name: &str;
-
-  if is_pnpm_cmd {
-    backup_name = raw_cmd.split("pnpm:").collect::<Vec<&str>>()[1]
-  } else if is_yarn_cmd {
-    backup_name = raw_cmd.split("yarn:").collect::<Vec<&str>>()[1]
-  } else if is_npm_cmd {
-    backup_name = raw_cmd.split("npm:").collect::<Vec<&str>>()[1]
-  } else {
-    backup_name = &default_name;
-  }
-
-  backup_name.to_string()
+  // Fallback to index-based name for plain commands with no explicit name
+  format!("{}", index)
 }
 
 fn truncate(s: &str, max_chars: usize) -> &str {
