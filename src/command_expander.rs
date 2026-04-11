@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 
 use anyhow::{Context, Result};
 use globset::GlobBuilder;
@@ -132,6 +133,22 @@ fn parse_wildcard(cmd: &str) -> Option<WildcardPattern> {
         exclusion,
         trailing_args: trailing.to_string(),
     })
+}
+
+#[derive(Deserialize)]
+struct PackageJson {
+    #[serde(default)]
+    scripts: HashMap<String, String>,
+}
+
+/// Read and parse the scripts field from a package.json manifest file.
+fn read_manifest(manifest_path: Option<&str>) -> Result<HashMap<String, String>> {
+    let path = manifest_path.unwrap_or("package.json");
+    let content = fs::read_to_string(path)
+        .context(format!("Could not read manifest file: {}", path))?;
+    let pkg: PackageJson = serde_json::from_str(&content)
+        .context(format!("Invalid JSON in manifest file: {}", path))?;
+    Ok(pkg.scripts)
 }
 
 #[cfg(test)]
@@ -315,5 +332,48 @@ mod tests {
     #[test]
     fn parse_wildcard_unknown_prefix_returns_none() {
         assert_eq!(parse_wildcard("deno:build:*"), None);
+    }
+
+    #[test]
+    fn read_manifest_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("package.json");
+        fs::write(
+            &path,
+            r#"{"scripts": {"build": "tsc", "test": "jest"}}"#,
+        )
+        .unwrap();
+        let scripts = read_manifest(Some(path.to_str().unwrap())).unwrap();
+        assert_eq!(scripts.len(), 2);
+        assert_eq!(scripts["build"], "tsc");
+        assert_eq!(scripts["test"], "jest");
+    }
+
+    #[test]
+    fn read_manifest_missing_file() {
+        let result = read_manifest(Some("/nonexistent/path/package.json"));
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("Could not read manifest"));
+    }
+
+    #[test]
+    fn read_manifest_no_scripts_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("package.json");
+        fs::write(&path, r#"{"name": "test", "version": "1.0.0"}"#).unwrap();
+        let scripts = read_manifest(Some(path.to_str().unwrap())).unwrap();
+        assert!(scripts.is_empty());
+    }
+
+    #[test]
+    fn read_manifest_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("package.json");
+        fs::write(&path, "this is not json {{{").unwrap();
+        let result = read_manifest(Some(path.to_str().unwrap()));
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("Invalid JSON"));
     }
 }
