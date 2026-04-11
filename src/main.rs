@@ -133,6 +133,7 @@ pub struct CommandParser {
 /// Parse a boolean from an environment variable value.
 /// Treats "true" and "1" (case-insensitive) as true, everything else as false.
 /// Returns None if the variable is missing or empty.
+#[cfg_attr(not(test), allow(dead_code))]
 fn env_bool(key: &str) -> Option<bool> {
   std::env::var(key).ok().filter(|v| !v.is_empty()).map(|v| {
     let v = v.to_lowercase();
@@ -142,6 +143,7 @@ fn env_bool(key: &str) -> Option<bool> {
 
 /// Read an environment variable and parse it, returning None on missing or invalid values.
 /// Prints a warning to stderr if the value is present but cannot be parsed.
+#[cfg_attr(not(test), allow(dead_code))]
 fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
   match std::env::var(key) {
     Ok(v) if v.is_empty() => None,
@@ -838,5 +840,146 @@ mod tests {
         .evaluate(&exit_codes, &names),
       1
     );
+  }
+
+  // ── env_bool ────────────────────────────────────────────────────────────────
+
+  fn with_env_var<F: FnOnce()>(key: &str, value: &str, f: F) {
+    std::env::set_var(key, value);
+    f();
+    std::env::remove_var(key);
+  }
+
+  fn without_env_var<F: FnOnce()>(key: &str, f: F) {
+    std::env::remove_var(key);
+    f();
+  }
+
+  #[test]
+  fn env_bool_true_values() {
+    with_env_var("MLTI_TEST_BOOL_TRUE_LOWER", "true", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_TRUE_LOWER"), Some(true));
+    });
+    with_env_var("MLTI_TEST_BOOL_TRUE_UPPER", "TRUE", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_TRUE_UPPER"), Some(true));
+    });
+    with_env_var("MLTI_TEST_BOOL_TRUE_MIXED", "True", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_TRUE_MIXED"), Some(true));
+    });
+    with_env_var("MLTI_TEST_BOOL_ONE", "1", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_ONE"), Some(true));
+    });
+  }
+
+  #[test]
+  fn env_bool_false_values() {
+    with_env_var("MLTI_TEST_BOOL_FALSE_LOWER", "false", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_FALSE_LOWER"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_FALSE_UPPER", "FALSE", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_FALSE_UPPER"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_ZERO", "0", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_ZERO"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_NO", "no", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_NO"), Some(false));
+    });
+    with_env_var("MLTI_TEST_BOOL_ANYTHING", "anything", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_ANYTHING"), Some(false));
+    });
+  }
+
+  #[test]
+  fn env_bool_empty_returns_none() {
+    with_env_var("MLTI_TEST_BOOL_EMPTY", "", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_EMPTY"), None);
+    });
+  }
+
+  #[test]
+  fn env_bool_missing_returns_none() {
+    without_env_var("MLTI_TEST_BOOL_MISSING_XYZ", || {
+      assert_eq!(env_bool("MLTI_TEST_BOOL_MISSING_XYZ"), None);
+    });
+  }
+
+  // ── env_parse ────────────────────────────────────────────────────────────────
+
+  #[test]
+  fn env_parse_valid_i64() {
+    with_env_var("MLTI_TEST_PARSE_42", "42", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_42"), Some(42));
+    });
+  }
+
+  #[test]
+  fn env_parse_negative_i64() {
+    with_env_var("MLTI_TEST_PARSE_NEG5", "-5", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_NEG5"), Some(-5));
+    });
+  }
+
+  #[test]
+  fn env_parse_invalid_returns_none() {
+    with_env_var("MLTI_TEST_PARSE_INVALID", "notanumber", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_INVALID"), None);
+    });
+  }
+
+  #[test]
+  fn env_parse_empty_returns_none() {
+    with_env_var("MLTI_TEST_PARSE_EMPTY", "", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_EMPTY"), None);
+    });
+  }
+
+  #[test]
+  fn env_parse_missing_returns_none() {
+    without_env_var("MLTI_TEST_PARSE_MISSING_XYZ", || {
+      assert_eq!(env_parse::<i64>("MLTI_TEST_PARSE_MISSING_XYZ"), None);
+    });
+  }
+
+  // ── parse_names ──────────────────────────────────────────────────────────────
+
+  #[test]
+  fn parse_names_comma_separated() {
+    assert_eq!(
+      parse_names(Some("foo,bar,baz".to_string()), ",".to_string()),
+      vec!["foo", "bar", "baz"]
+    );
+  }
+
+  #[test]
+  fn parse_names_custom_separator() {
+    assert_eq!(
+      parse_names(Some("foo|bar".to_string()), "|".to_string()),
+      vec!["foo", "bar"]
+    );
+  }
+
+  #[test]
+  fn parse_names_none_returns_empty() {
+    assert_eq!(parse_names(None, ",".to_string()), Vec::<String>::new());
+  }
+
+  // ── parse_max_processes ──────────────────────────────────────────────────────
+
+  #[test]
+  fn parse_max_processes_none_returns_i32_max() {
+    assert_eq!(parse_max_processes(None), i32::MAX);
+  }
+
+  #[test]
+  fn parse_max_processes_numeric() {
+    assert_eq!(parse_max_processes(Some("4".to_string())), 4);
+  }
+
+  #[test]
+  fn parse_max_processes_percentage() {
+    let cpus = num_cpus::get();
+    let expected = (cpus as f32 * 0.5) as i32;
+    assert_eq!(parse_max_processes(Some("50%".to_string())), expected);
   }
 }
