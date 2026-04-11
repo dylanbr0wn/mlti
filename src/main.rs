@@ -27,6 +27,9 @@ fn default_prefix_length() -> i16 {
 fn default_names_separator() -> String {
   ",".to_string()
 }
+fn default_success() -> String {
+  "all".to_string()
+}
 
 #[derive(FromArgs)]
 /// Launch some commands concurrently
@@ -91,6 +94,10 @@ pub struct Commands {
   /// timestamp format for logging
   #[argh(option, short = 't', default = "String::from(\"%Y-%m-%d %H:%M:%S\")")]
   timestamp_format: String,
+
+  /// success condition: all, first, last, command-{{index|name}}, !command-{{index|name}}
+  #[argh(option, short = 's', default = "default_success()")]
+  success: String,
 }
 
 #[derive(Clone)]
@@ -112,13 +119,16 @@ pub struct CommandParser {
   pub names: Vec<String>,
   pub processes: Vec<String>,
   pub mlti_config: MltiConfig,
+  success_condition: SuccessCondition,
 }
 
 impl CommandParser {
-  pub fn new(commands: Commands) -> Self {
-    Self {
+  pub fn new(commands: Commands) -> Result<Self, String> {
+    let success_condition = SuccessCondition::parse(&commands.success)?;
+    Ok(Self {
       names: parse_names(commands.names, commands.names_seperator),
       processes: commands.processes,
+      success_condition,
       mlti_config: MltiConfig {
         group: commands.group,
         kill_others: commands.kill_others,
@@ -132,7 +142,7 @@ impl CommandParser {
         no_color: commands.no_color,
         timestamp_format: commands.timestamp_format,
       },
-    }
+    })
   }
 
   pub fn len(&self) -> usize {
@@ -143,6 +153,95 @@ impl CommandParser {
   }
   pub fn get_mlti_config(&self) -> MltiConfig {
     self.mlti_config.clone()
+  }
+
+  /// Compute the overall exit code from a collection of per-task
+  /// `(index, code)` pairs, applying the configured success condition.
+  pub fn evaluate_exit_code(&self, exit_codes: &[(usize, i32)]) -> i32 {
+    self.success_condition.evaluate(exit_codes, &self.names)
+  }
+}
+
+#[cfg_attr(test, derive(Debug, PartialEq))]
+enum SuccessCondition {
+  All,
+  First,
+  Last,
+  CommandIndex(usize),
+  CommandName(String),
+  NotCommandIndex(usize),
+  NotCommandName(String),
+}
+
+/// Extract the exit code from an optional `(index, code)` pair,
+/// or return `default` if the pair is absent (e.g. command never ran).
+fn code_at(pair: Option<&(usize, i32)>, default: i32) -> i32 {
+  pair.map_or(default, |(_, code)| *code)
+}
+
+/// Find the first non-zero exit code among `exit_codes`, optionally skipping
+/// the entry whose index matches `exclude`. Returns 0 if all remaining are 0.
+fn first_nonzero(exit_codes: &[(usize, i32)], exclude: Option<usize>) -> i32 {
+  exit_codes
+    .iter()
+    .filter(|(i, _)| exclude != Some(*i))
+    .find(|(_, code)| *code != 0)
+    .map_or(0, |(_, code)| *code)
+}
+
+impl SuccessCondition {
+  fn parse(s: &str) -> Result<Self, String> {
+    match s {
+      "all" => Ok(Self::All),
+      "first" => Ok(Self::First),
+      "last" => Ok(Self::Last),
+      s if s.starts_with("!command-") => {
+        let val = &s["!command-".len()..];
+        if let Ok(idx) = val.parse::<usize>() {
+          Ok(Self::NotCommandIndex(idx))
+        } else {
+          Ok(Self::NotCommandName(val.to_string()))
+        }
+      }
+      s if s.starts_with("command-") => {
+        let val = &s["command-".len()..];
+        if let Ok(idx) = val.parse::<usize>() {
+          Ok(Self::CommandIndex(idx))
+        } else {
+          Ok(Self::CommandName(val.to_string()))
+        }
+      }
+      other => Err(format!(
+        "Invalid success condition: '{}'. Expected: all, first, last, \
+         command-{{name|index}}, !command-{{name|index}}",
+        other
+      )),
+    }
+  }
+
+  fn evaluate(&self, exit_codes: &[(usize, i32)], names: &[String]) -> i32 {
+    if exit_codes.is_empty() {
+      return 1;
+    }
+    match self {
+      Self::All => first_nonzero(exit_codes, None),
+      Self::First => code_at(exit_codes.first(), 1),
+      Self::Last => code_at(exit_codes.last(), 1),
+      Self::CommandIndex(idx) => {
+        code_at(exit_codes.iter().find(|(i, _)| i == idx), 1)
+      }
+      Self::CommandName(name) => match names.iter().position(|n| n == name) {
+        Some(idx) => code_at(exit_codes.iter().find(|(i, _)| *i == idx), 1),
+        None => 1,
+      },
+      Self::NotCommandIndex(idx) => first_nonzero(exit_codes, Some(*idx)),
+      Self::NotCommandName(name) => match names.iter().position(|n| n == name) {
+        // Unknown name is a misconfiguration — fail rather than silently
+        // degenerating to `all`, which hid bugs in practice.
+        Some(idx) => first_nonzero(exit_codes, Some(idx)),
+        None => 1,
+      },
+    }
   }
 }
 
@@ -176,7 +275,10 @@ async fn main() -> Result<()> {
   let commands: Commands = argh::from_env();
   let red_style = Style::new().red();
   let bold_green_style = Style::new().bold().green();
-  let arg_parser = CommandParser::new(commands);
+  let arg_parser = CommandParser::new(commands).unwrap_or_else(|e| {
+    eprintln!("{}", e);
+    std::process::exit(1);
+  });
   let mlti_config = arg_parser.get_mlti_config();
 
   let mut shutdown_messenger = messenger::Messenger::new(
@@ -413,7 +515,7 @@ async fn main() -> Result<()> {
   scheduler_handler.await.ok();
 
   let exit_codes = scheduler.get_exit_codes().await;
-  let first_non_zero = exit_codes.iter().find(|&&code| code != 0).copied();
+  let exit_code = arg_parser.evaluate_exit_code(&exit_codes);
 
   print_message(
     SenderType::Main,
@@ -424,9 +526,184 @@ async fn main() -> Result<()> {
     mlti_config.no_color,
   );
 
-  if let Some(code) = first_non_zero {
-    std::process::exit(code);
+  if exit_code != 0 {
+    std::process::exit(exit_code);
   }
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  // ---- SuccessCondition::parse ----
+
+  #[test]
+  fn parse_simple_variants() {
+    assert_eq!(
+      SuccessCondition::parse("all").unwrap(),
+      SuccessCondition::All
+    );
+    assert_eq!(
+      SuccessCondition::parse("first").unwrap(),
+      SuccessCondition::First
+    );
+    assert_eq!(
+      SuccessCondition::parse("last").unwrap(),
+      SuccessCondition::Last
+    );
+  }
+
+  #[test]
+  fn parse_command_index_and_name() {
+    assert_eq!(
+      SuccessCondition::parse("command-0").unwrap(),
+      SuccessCondition::CommandIndex(0)
+    );
+    assert_eq!(
+      SuccessCondition::parse("command-42").unwrap(),
+      SuccessCondition::CommandIndex(42)
+    );
+    assert_eq!(
+      SuccessCondition::parse("command-server").unwrap(),
+      SuccessCondition::CommandName("server".to_string())
+    );
+  }
+
+  #[test]
+  fn parse_not_command_index_and_name() {
+    assert_eq!(
+      SuccessCondition::parse("!command-0").unwrap(),
+      SuccessCondition::NotCommandIndex(0)
+    );
+    assert_eq!(
+      SuccessCondition::parse("!command-watcher").unwrap(),
+      SuccessCondition::NotCommandName("watcher".to_string())
+    );
+  }
+
+  #[test]
+  fn parse_rejects_invalid() {
+    assert!(SuccessCondition::parse("").is_err());
+    assert!(SuccessCondition::parse("nope").is_err());
+    assert!(SuccessCondition::parse("commands-0").is_err());
+  }
+
+  // ---- SuccessCondition::evaluate ----
+
+  fn codes(pairs: &[(usize, i32)]) -> Vec<(usize, i32)> {
+    pairs.to_vec()
+  }
+
+  #[test]
+  fn evaluate_empty_returns_error_code() {
+    // Empty exit_codes is a defensive case; the main loop short-circuits
+    // earlier, but evaluate should still return a non-zero sentinel.
+    assert_eq!(SuccessCondition::All.evaluate(&[], &[]), 1);
+  }
+
+  #[test]
+  fn evaluate_all_returns_zero_when_all_succeed() {
+    let exit_codes = codes(&[(0, 0), (1, 0), (2, 0)]);
+    assert_eq!(SuccessCondition::All.evaluate(&exit_codes, &[]), 0);
+  }
+
+  #[test]
+  fn evaluate_all_returns_first_nonzero() {
+    // Order is completion order, not definition order.
+    let exit_codes = codes(&[(2, 0), (0, 7), (1, 3)]);
+    assert_eq!(SuccessCondition::All.evaluate(&exit_codes, &[]), 7);
+  }
+
+  #[test]
+  fn evaluate_first_and_last_follow_completion_order() {
+    let exit_codes = codes(&[(2, 5), (0, 0), (1, 9)]);
+    assert_eq!(SuccessCondition::First.evaluate(&exit_codes, &[]), 5);
+    assert_eq!(SuccessCondition::Last.evaluate(&exit_codes, &[]), 9);
+  }
+
+  #[test]
+  fn evaluate_command_index_returns_that_commands_code() {
+    let exit_codes = codes(&[(0, 0), (1, 42), (2, 0)]);
+    assert_eq!(
+      SuccessCondition::CommandIndex(1).evaluate(&exit_codes, &[]),
+      42
+    );
+  }
+
+  #[test]
+  fn evaluate_command_index_missing_returns_one() {
+    // e.g. --kill-others-on-fail killed the target command before it exited.
+    let exit_codes = codes(&[(0, 0), (2, 0)]);
+    assert_eq!(
+      SuccessCondition::CommandIndex(1).evaluate(&exit_codes, &[]),
+      1
+    );
+  }
+
+  #[test]
+  fn evaluate_command_name_resolves_via_names() {
+    let names = vec!["build".to_string(), "serve".to_string(), "test".to_string()];
+    let exit_codes = codes(&[(0, 0), (1, 7), (2, 0)]);
+    assert_eq!(
+      SuccessCondition::CommandName("serve".to_string())
+        .evaluate(&exit_codes, &names),
+      7
+    );
+  }
+
+  #[test]
+  fn evaluate_command_name_unknown_returns_one() {
+    let names = vec!["build".to_string(), "serve".to_string()];
+    let exit_codes = codes(&[(0, 0), (1, 0)]);
+    assert_eq!(
+      SuccessCondition::CommandName("missing".to_string())
+        .evaluate(&exit_codes, &names),
+      1
+    );
+  }
+
+  #[test]
+  fn evaluate_not_command_index_excludes_one() {
+    // Command 1 failed but we don't care — index 0 also failed and should win.
+    let exit_codes = codes(&[(0, 3), (1, 7), (2, 0)]);
+    assert_eq!(
+      SuccessCondition::NotCommandIndex(1).evaluate(&exit_codes, &[]),
+      3
+    );
+  }
+
+  #[test]
+  fn evaluate_not_command_index_success_when_only_excluded_failed() {
+    let exit_codes = codes(&[(0, 0), (1, 9), (2, 0)]);
+    assert_eq!(
+      SuccessCondition::NotCommandIndex(1).evaluate(&exit_codes, &[]),
+      0
+    );
+  }
+
+  #[test]
+  fn evaluate_not_command_name_resolves_and_excludes() {
+    let names = vec!["build".to_string(), "flaky".to_string(), "test".to_string()];
+    let exit_codes = codes(&[(0, 4), (1, 9), (2, 0)]);
+    assert_eq!(
+      SuccessCondition::NotCommandName("flaky".to_string())
+        .evaluate(&exit_codes, &names),
+      4
+    );
+  }
+
+  #[test]
+  fn evaluate_not_command_name_unknown_returns_one() {
+    // Regression: previously this silently degenerated to `all`, hiding
+    // typos in CI configs. The unknown name must now fail loudly.
+    let names = vec!["build".to_string(), "serve".to_string()];
+    let exit_codes = codes(&[(0, 0), (1, 0)]);
+    assert_eq!(
+      SuccessCondition::NotCommandName("typo".to_string())
+        .evaluate(&exit_codes, &names),
+      1
+    );
+  }
 }

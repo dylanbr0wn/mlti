@@ -16,7 +16,7 @@ pub(crate) struct Scheduler {
   number_of_tasks: i32,
   kill_all_tx: Sender<()>,
   kill_all_rx: Receiver<()>,
-  exit_codes: Arc<Mutex<Vec<i32>>>,
+  exit_codes: Arc<Mutex<Vec<(usize, i32)>>>,
 }
 
 impl Scheduler {
@@ -47,7 +47,7 @@ impl Scheduler {
     self.kill_all_tx.clone()
   }
 
-  pub async fn get_exit_codes(&self) -> Vec<i32> {
+  pub async fn get_exit_codes(&self) -> Vec<(usize, i32)> {
     self.exit_codes.lock().await.clone()
   }
 
@@ -70,14 +70,15 @@ impl Scheduler {
           if let Some(mut task) = task {
             *running_processes += 1;
             let exit_codes = self.exit_codes.clone();
+            let task_index = task.index();
             join_set.spawn(async move {
               match task.start().await {
                 Ok(code) => {
-                  exit_codes.lock().await.push(code);
+                  exit_codes.lock().await.push((task_index, code));
                 }
                 Err(e) => {
                   println!("{}", e);
-                  exit_codes.lock().await.push(1);
+                  exit_codes.lock().await.push((task_index, 1));
                 }
               }
             });
