@@ -20,6 +20,82 @@ struct WildcardPattern {
     trailing_args: String,
 }
 
+#[cfg_attr(test, derive(Debug, PartialEq))]
+struct ExpandedMatch {
+    command: String,
+    auto_name: String,
+}
+
+/// Match a wildcard pattern against script names. Returns expanded commands
+/// and auto-generated names, sorted by command for deterministic output.
+fn match_scripts(
+    pattern: &WildcardPattern,
+    scripts: &HashMap<String, String>,
+) -> Result<Vec<ExpandedMatch>> {
+    let glob = GlobBuilder::new(&pattern.glob_pattern)
+        .literal_separator(false)
+        .build()
+        .context(format!(
+            "Invalid glob pattern: {}",
+            pattern.glob_pattern
+        ))?
+        .compile_matcher();
+
+    let exclusion_matcher = if let Some(ref excl) = pattern.exclusion {
+        let literal_prefix = pattern
+            .glob_pattern
+            .split('*')
+            .next()
+            .unwrap_or("");
+        let excl_glob = format!("{}{}*", literal_prefix, excl);
+        Some(
+            GlobBuilder::new(&excl_glob)
+                .literal_separator(false)
+                .build()
+                .context(format!("Invalid exclusion pattern: {}", excl_glob))?
+                .compile_matcher(),
+        )
+    } else {
+        None
+    };
+
+    let name_prefix = pattern
+        .glob_pattern
+        .split('*')
+        .next()
+        .unwrap_or("");
+
+    let mut matches: Vec<ExpandedMatch> = scripts
+        .keys()
+        .filter(|name| {
+            if !glob.is_match(name.as_str()) {
+                return false;
+            }
+            if let Some(ref excl) = exclusion_matcher {
+                if excl.is_match(name.as_str()) {
+                    return false;
+                }
+            }
+            true
+        })
+        .map(|name| {
+            let auto_name = name
+                .strip_prefix(name_prefix)
+                .unwrap_or(name)
+                .to_string();
+            let command = format!(
+                "{}{}{}",
+                pattern.runner_prefix, name, pattern.trailing_args
+            );
+            ExpandedMatch { command, auto_name }
+        })
+        .collect();
+
+    matches.sort_by(|a, b| a.command.cmp(&b.command));
+
+    Ok(matches)
+}
+
 /// Parse a command string into a WildcardPattern if it contains a wildcard.
 /// Returns None for non-wildcard commands.
 fn parse_wildcard(cmd: &str) -> Option<WildcardPattern> {
@@ -61,6 +137,72 @@ fn parse_wildcard(cmd: &str) -> Option<WildcardPattern> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_scripts() -> HashMap<String, String> {
+        HashMap::from([
+            ("build:client".into(), "webpack --config client.js".into()),
+            ("build:server".into(), "webpack --config server.js".into()),
+            ("test:unit".into(), "jest".into()),
+            ("lint:js".into(), "eslint .".into()),
+            ("lint:ts".into(), "tsc --noEmit".into()),
+            ("lint:fix".into(), "eslint --fix .".into()),
+            ("lint:fix:js".into(), "eslint --fix --ext .js .".into()),
+        ])
+    }
+
+    #[test]
+    fn match_scripts_basic_glob() {
+        let pattern = parse_wildcard("npm:build:*").unwrap();
+        let matches = match_scripts(&pattern, &test_scripts()).unwrap();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].command, "npm run build:client");
+        assert_eq!(matches[0].auto_name, "client");
+        assert_eq!(matches[1].command, "npm run build:server");
+        assert_eq!(matches[1].auto_name, "server");
+    }
+
+    #[test]
+    fn match_scripts_with_exclusion() {
+        let pattern = parse_wildcard("npm:lint:*(!fix)").unwrap();
+        let matches = match_scripts(&pattern, &test_scripts()).unwrap();
+        assert_eq!(matches.len(), 2);
+        let names: Vec<&str> = matches.iter().map(|m| m.auto_name.as_str()).collect();
+        assert!(names.contains(&"js"));
+        assert!(names.contains(&"ts"));
+    }
+
+    #[test]
+    fn match_scripts_no_matches() {
+        let pattern = parse_wildcard("npm:deploy:*").unwrap();
+        let matches = match_scripts(&pattern, &test_scripts()).unwrap();
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn match_scripts_with_trailing_args() {
+        let pattern = parse_wildcard("npm:build:* --verbose").unwrap();
+        let matches = match_scripts(&pattern, &test_scripts()).unwrap();
+        assert_eq!(matches[0].command, "npm run build:client --verbose");
+        assert_eq!(matches[1].command, "npm run build:server --verbose");
+    }
+
+    #[test]
+    fn match_scripts_star_alone_matches_all() {
+        let pattern = parse_wildcard("npm:*").unwrap();
+        let matches = match_scripts(&pattern, &test_scripts()).unwrap();
+        assert_eq!(matches.len(), 7);
+        // auto_name for bare * is the full script name
+        assert_eq!(matches[0].auto_name, "build:client");
+    }
+
+    #[test]
+    fn match_scripts_auto_name_strips_prefix() {
+        let pattern = parse_wildcard("pnpm:test:*").unwrap();
+        let matches = match_scripts(&pattern, &test_scripts()).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].auto_name, "unit");
+        assert_eq!(matches[0].command, "pnpm run test:unit");
+    }
 
     #[test]
     fn parse_wildcard_npm_basic() {
