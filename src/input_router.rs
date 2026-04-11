@@ -109,19 +109,19 @@ impl InputRouter {
         match handles.get_mut(&parsed.target) {
             Some(stdin) => {
                 let data = format!("{}\n", parsed.payload);
-                if let Err(_) = stdin.write_all(data.as_bytes()).await {
+                if stdin.write_all(data.as_bytes()).await.is_err() {
                     // Process died between lookup and write
+                    handles.remove(&parsed.target);
                     drop(handles);
-                    self.deregister(parsed.target).await;
                     self.send_message(format!(
                         "[mlti] Failed to send input to \"{}\" (process exited)",
                         parsed.target_name
                     ));
                     return;
                 }
-                if let Err(_) = stdin.flush().await {
+                if stdin.flush().await.is_err() {
+                    handles.remove(&parsed.target);
                     drop(handles);
-                    self.deregister(parsed.target).await;
                     self.send_message(format!(
                         "[mlti] Failed to send input to \"{}\" (process exited)",
                         parsed.target_name
@@ -151,7 +151,7 @@ impl InputRouter {
                 None,
                 build_message_sender(SenderType::Main, None, None),
             ))
-            .expect("Could not send message on channel.");
+            .ok();
     }
 }
 
