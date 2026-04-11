@@ -60,9 +60,19 @@ impl Task {
     let mut restart_attempts = self.mlti_config.restart_tries - 1;
 
     loop {
+      // Deregister any previous stdin handle (no-op on first iteration)
+      if let Some(ref router) = self.input_router {
+        router.deregister(self.process.index).await;
+      }
       let attempt_child = self.process.run(self.mlti_config.handle_input);
       match attempt_child {
-        Ok(c) => {
+        Ok(mut c) => {
+          // Register stdin with the input router if enabled
+          if let Some(ref router) = self.input_router {
+            if let Some(stdin) = c.stdin.take() {
+              router.register(self.process.index, stdin).await;
+            }
+          }
           child = Some(c);
           break;
         }
@@ -128,13 +138,6 @@ impl Task {
 
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
-
-    // Register stdin with the input router if enabled
-    if let Some(ref router) = self.input_router {
-      if let Some(stdin) = child.stdin.take() {
-        router.register(self.process.index, stdin).await;
-      }
-    }
 
     let handle = tokio::spawn(async move {
       child
