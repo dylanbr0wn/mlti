@@ -17,6 +17,10 @@ num_cpus = "1.13.1"
 owo-colors = "3.5.0"
 rand = "0.8.5"
 tokio = { version = "1.21.2", features = ["net", "rt", "macros", "rt-multi-thread", "process", "io-util", "io-std", "time", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+globset = "0.4"
 
 [dev-dependencies]
 wait-timeout = "0.2"
+tempfile = "3"

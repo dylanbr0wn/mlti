@@ -13,13 +13,15 @@ use crate::message::{build_message_sender, Message, MessageType, SenderType};
 /// Matches a name in `names` first (so a process literally named "1" wins
 /// over the index `1`), then falls back to parsing the candidate as a
 /// `usize` and checking it is within `0..num_processes`. `num_processes`
-/// may be larger than `names.len()` because naming is optional.
+/// may be larger than `names.len()` because naming is optional; individual
+/// slots in `names` may also be `None` when wildcard expansion produces
+/// unnamed processes.
 pub fn resolve_target(
   candidate: &str,
-  names: &[String],
+  names: &[Option<String>],
   num_processes: usize,
 ) -> Option<usize> {
-  if let Some(idx) = names.iter().position(|n| n == candidate) {
+  if let Some(idx) = names.iter().position(|n| n.as_deref() == Some(candidate)) {
     return Some(idx);
   }
   if let Ok(idx) = candidate.parse::<usize>() {
@@ -37,7 +39,10 @@ pub struct InputRouter {
   // other processes. A slow child can still back up its own routing, but
   // it no longer stalls the rest of the input subsystem.
   handles: Mutex<HashMap<usize, Arc<Mutex<ChildStdin>>>>,
-  names: Vec<String>,
+  // Slots may be `None` for processes produced by wildcard expansion
+  // that end up unnamed — targeting those by name is impossible, but
+  // they can still be addressed by index.
+  names: Vec<Option<String>>,
   // `num_processes` may exceed `names.len()` because `--names` is
   // optional — keep both rather than assuming they are equal.
   num_processes: usize,
@@ -57,7 +62,7 @@ struct ParsedInput {
 
 impl InputRouter {
   pub fn new(
-    names: Vec<String>,
+    names: Vec<Option<String>>,
     num_processes: usize,
     default_target: usize,
     message_tx: Sender<Message>,
@@ -94,12 +99,13 @@ impl InputRouter {
     }
   }
 
-  /// Get a display name for a process index.
+  /// Get a display name for a process index. Falls back to the
+  /// stringified index when the slot is missing or `None`.
   fn display_name(&self, index: usize) -> String {
     self
       .names
       .get(index)
-      .cloned()
+      .and_then(|n| n.clone())
       .unwrap_or_else(|| index.to_string())
   }
 
@@ -192,15 +198,15 @@ mod tests {
   ) -> InputRouter {
     let (tx, _rx) = flume::unbounded();
     InputRouter::new(
-      names.into_iter().map(String::from).collect(),
+      names.into_iter().map(|s| Some(s.to_string())).collect(),
       num_processes,
       default_target,
       tx,
     )
   }
 
-  fn names_of(strs: &[&str]) -> Vec<String> {
-    strs.iter().map(|s| s.to_string()).collect()
+  fn names_of(strs: &[&str]) -> Vec<Option<String>> {
+    strs.iter().map(|s| Some(s.to_string())).collect()
   }
 
   // -- resolve_target --
@@ -241,10 +247,23 @@ mod tests {
   #[test]
   fn resolve_with_unnamed_processes() {
     // num_processes can exceed names.len() when --names is not given.
-    let names: Vec<String> = vec![];
+    let names: Vec<Option<String>> = vec![];
     assert_eq!(resolve_target("0", &names, 3), Some(0));
     assert_eq!(resolve_target("2", &names, 3), Some(2));
     assert_eq!(resolve_target("3", &names, 3), None);
+  }
+
+  #[test]
+  fn resolve_skips_none_slots_when_matching_by_name() {
+    // A mixed names vector — some slots named, others left as `None`
+    // because wildcard expansion produced unnamed processes. Name
+    // matches must ignore the `None` slots but index fallback must
+    // still hit them.
+    let names: Vec<Option<String>> =
+      vec![Some("server".to_string()), None, Some("worker".to_string())];
+    assert_eq!(resolve_target("server", &names, 3), Some(0));
+    assert_eq!(resolve_target("worker", &names, 3), Some(2));
+    assert_eq!(resolve_target("1", &names, 3), Some(1));
   }
 
   // -- parse_line --
