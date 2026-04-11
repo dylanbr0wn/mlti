@@ -1,13 +1,16 @@
+use std::sync::Arc;
+
 use command::Process;
 use message::{build_message_sender, Message, MessageType};
 use owo_colors::Style;
 use rand::Rng;
+use tokio::io::AsyncBufReadExt;
 
 use anyhow::Result;
 use argh::FromArgs;
 use task::Task;
 
-use crate::{message::SenderType, messenger::print_message};
+use crate::{input_router::InputRouter, message::SenderType, messenger::print_message};
 
 mod command;
 mod message;
@@ -284,6 +287,33 @@ pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
   }
 }
 
+fn resolve_default_target(
+  target: &Option<String>,
+  names: &[String],
+  num_processes: usize,
+) -> usize {
+  match target {
+    None => 0,
+    Some(t) => {
+      // Try name match first
+      if let Some(idx) = names.iter().position(|n| n == t) {
+        return idx;
+      }
+      // Fall back to index
+      if let Ok(idx) = t.parse::<usize>() {
+        if idx < num_processes {
+          return idx;
+        }
+      }
+      eprintln!(
+        "Error: --default-input-target \"{}\" does not match any process name or index",
+        t
+      );
+      std::process::exit(1);
+    }
+  }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
   let commands: Commands = argh::from_env();
@@ -385,6 +415,22 @@ async fn main() -> Result<()> {
     arg_parser.len() as i32,
   ));
 
+  let input_router: Option<Arc<InputRouter>> = if mlti_config.handle_input {
+    let default_target = resolve_default_target(
+      &arg_parser.default_input_target,
+      &arg_parser.names,
+      arg_parser.len(),
+    );
+    Some(Arc::new(InputRouter::new(
+      arg_parser.names.clone(),
+      arg_parser.len(),
+      default_target,
+      message_tx.clone(),
+    )))
+  } else {
+    None
+  };
+
   // let mut unnamed_counter = -1;
 
   let mut rng = rand::thread_rng();
@@ -420,11 +466,24 @@ async fn main() -> Result<()> {
         message_tx.clone(),
         shutdown_tx.clone(),
         mlti_config.to_owned(),
-        None, // input_router — wired in Task 7
+        input_router.clone(),
       ))
       .await
       .expect("Could not send task on channel.");
   }
+
+  let stdin_reader_handle = if let Some(ref router) = input_router {
+    let router = router.clone();
+    Some(tokio::spawn(async move {
+      let stdin = tokio::io::stdin();
+      let mut reader = tokio::io::BufReader::new(stdin).lines();
+      while let Ok(Some(line)) = reader.next_line().await {
+        router.route(&line).await;
+      }
+    }))
+  } else {
+    None
+  };
 
   shutdown_messenger
     .listen(
@@ -526,6 +585,10 @@ async fn main() -> Result<()> {
       },
     )
     .await;
+  // Abort the stdin reader task if it's running
+  if let Some(handle) = stdin_reader_handle {
+    handle.abort();
+  }
   messenger_handle.await.ok();
   scheduler_handler.await.ok();
 

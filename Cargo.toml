@@ -16,4 +16,4 @@ futures = "0.3.25"
 num_cpus = "1.13.1"
 owo-colors = "3.5.0"
 rand = "0.8.5"
-tokio = { version = "1.21.2", features = ["net", "rt", "macros", "rt-multi-thread", "process", "io-util", "time", "sync"] }
+tokio = { version = "1.21.2", features = ["net", "rt", "macros", "rt-multi-thread", "process", "io-util", "io-std", "time", "sync"] }
