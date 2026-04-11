@@ -134,13 +134,10 @@ pub struct CommandParser {
 /// Treats "true" and "1" (case-insensitive) as true, everything else as false.
 /// Returns None if the variable is missing or empty.
 fn env_bool(key: &str) -> Option<bool> {
-  std::env::var(key)
-    .ok()
-    .filter(|v| !v.is_empty())
-    .map(|v| {
-      let v = v.to_lowercase();
-      v == "true" || v == "1"
-    })
+  std::env::var(key).ok().filter(|v| !v.is_empty()).map(|v| {
+    let v = v.to_lowercase();
+    v == "true" || v == "1"
+  })
 }
 
 /// Read an environment variable and parse it, returning None on missing or invalid values.
@@ -171,7 +168,7 @@ impl CommandParser {
     let raw = commands.raw || env_bool("MLTI_RAW").unwrap_or(false);
     let no_color = commands.no_color
       || env_bool("MLTI_NO_COLOR").unwrap_or(false)
-      || std::env::var("NO_COLOR").map_or(false, |v| !v.is_empty());
+      || std::env::var("NO_COLOR").is_ok_and(|v| !v.is_empty());
     let group = commands.group || env_bool("MLTI_GROUP").unwrap_or(false);
 
     // For options with defaults: if CLI value equals the default, try the env var.
@@ -208,7 +205,8 @@ impl CommandParser {
       .or_else(|| std::env::var("MLTI_MAX_PROCESSES").ok());
 
     // For timestamp_format: if CLI value equals the default, try the env var.
-    let timestamp_format = if commands.timestamp_format != default_timestamp_format() {
+    let timestamp_format = if commands.timestamp_format != default_timestamp_format()
+    {
       commands.timestamp_format
     } else {
       std::env::var("MLTI_TIMESTAMP_FORMAT").unwrap_or(commands.timestamp_format)
