@@ -10,6 +10,7 @@ use task::Task;
 use crate::{message::SenderType, messenger::print_message};
 
 mod command;
+mod command_expander;
 mod message;
 mod messenger;
 mod scheduler;
