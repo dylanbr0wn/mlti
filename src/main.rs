@@ -10,6 +10,7 @@ use task::Task;
 use crate::{message::SenderType, messenger::print_message};
 
 mod command;
+mod command_expander;
 mod message;
 mod messenger;
 mod scheduler;
@@ -113,6 +114,10 @@ pub struct Commands {
   /// print a duration summary for each process after completion
   #[argh(switch)]
   timings: bool,
+
+  /// path to package.json for wildcard expansion
+  #[argh(option)]
+  manifest_path: Option<String>,
 }
 
 #[derive(Clone)]
@@ -153,7 +158,7 @@ pub fn is_hidden_by(list: &[HideTarget], index: Option<usize>, name: &str) -> bo
 }
 
 pub struct CommandParser {
-  pub names: Vec<String>,
+  pub names: Vec<Option<String>>,
   pub processes: Vec<String>,
   pub mlti_config: MltiConfig,
   success_condition: SuccessCondition,
@@ -241,9 +246,18 @@ impl CommandParser {
       std::env::var("MLTI_TIMESTAMP_FORMAT").unwrap_or(commands.timestamp_format)
     };
 
+    // Expand all package manager shortcuts (both wildcard and non-wildcard).
+    let parsed_names = parse_names(names, names_separator);
+    let (processes, expanded_names) = command_expander::expand_commands(
+      commands.processes,
+      parsed_names,
+      commands.manifest_path,
+    )
+    .map_err(|e| e.to_string())?;
+
     Ok(Self {
-      names: parse_names(names, names_separator),
-      processes: commands.processes,
+      names: expanded_names,
+      processes,
       success_condition,
       mlti_config: MltiConfig {
         group,
@@ -338,7 +352,7 @@ impl SuccessCondition {
     }
   }
 
-  fn evaluate(&self, exit_codes: &[(usize, i32)], names: &[String]) -> i32 {
+  fn evaluate(&self, exit_codes: &[(usize, i32)], names: &[Option<String>]) -> i32 {
     if exit_codes.is_empty() {
       return 1;
     }
@@ -349,17 +363,25 @@ impl SuccessCondition {
       Self::CommandIndex(idx) => {
         code_at(exit_codes.iter().find(|(i, _)| i == idx), 1)
       }
-      Self::CommandName(name) => match names.iter().position(|n| n == name) {
-        Some(idx) => code_at(exit_codes.iter().find(|(i, _)| *i == idx), 1),
-        None => 1,
-      },
+      Self::CommandName(name) => {
+        match names
+          .iter()
+          .position(|n| n.as_deref() == Some(name.as_str()))
+        {
+          Some(idx) => code_at(exit_codes.iter().find(|(i, _)| *i == idx), 1),
+          None => 1,
+        }
+      }
       Self::NotCommandIndex(idx) => first_nonzero(exit_codes, Some(*idx)),
-      Self::NotCommandName(name) => match names.iter().position(|n| n == name) {
-        // Unknown name is a misconfiguration — fail rather than silently
-        // degenerating to `all`, which hid bugs in practice.
-        Some(idx) => first_nonzero(exit_codes, Some(idx)),
-        None => 1,
-      },
+      Self::NotCommandName(name) => {
+        match names
+          .iter()
+          .position(|n| n.as_deref() == Some(name.as_str()))
+        {
+          Some(idx) => first_nonzero(exit_codes, Some(idx)),
+          None => 1,
+        }
+      }
     }
   }
 }
@@ -420,6 +442,7 @@ async fn main() -> Result<()> {
   let commands: Commands = argh::from_env();
   let red_style = Style::new().red();
   let bold_green_style = Style::new().bold().green();
+
   let arg_parser = CommandParser::new(commands).unwrap_or_else(|e| {
     eprintln!("{}", e);
     std::process::exit(1);
@@ -528,7 +551,7 @@ async fn main() -> Result<()> {
     let r = rng.gen_range(75..255);
     let g = rng.gen_range(75..255);
     let b = rng.gen_range(75..255);
-    let name = arg_parser.names.get(i).map(|name| name.to_string());
+    let name = arg_parser.names.get(i).cloned().flatten();
 
     let my_cmd = Process::new(
       arg_parser.processes[i].clone(),
@@ -906,7 +929,11 @@ mod tests {
 
   #[test]
   fn evaluate_command_name_resolves_via_names() {
-    let names = vec!["build".to_string(), "serve".to_string(), "test".to_string()];
+    let names: Vec<Option<String>> = vec![
+      Some("build".into()),
+      Some("serve".into()),
+      Some("test".into()),
+    ];
     let exit_codes = codes(&[(0, 0), (1, 7), (2, 0)]);
     assert_eq!(
       SuccessCondition::CommandName("serve".to_string())
@@ -917,7 +944,8 @@ mod tests {
 
   #[test]
   fn evaluate_command_name_unknown_returns_one() {
-    let names = vec!["build".to_string(), "serve".to_string()];
+    let names: Vec<Option<String>> =
+      vec![Some("build".into()), Some("serve".into())];
     let exit_codes = codes(&[(0, 0), (1, 0)]);
     assert_eq!(
       SuccessCondition::CommandName("missing".to_string())
@@ -947,7 +975,11 @@ mod tests {
 
   #[test]
   fn evaluate_not_command_name_resolves_and_excludes() {
-    let names = vec!["build".to_string(), "flaky".to_string(), "test".to_string()];
+    let names: Vec<Option<String>> = vec![
+      Some("build".into()),
+      Some("flaky".into()),
+      Some("test".into()),
+    ];
     let exit_codes = codes(&[(0, 4), (1, 9), (2, 0)]);
     assert_eq!(
       SuccessCondition::NotCommandName("flaky".to_string())
@@ -960,7 +992,8 @@ mod tests {
   fn evaluate_not_command_name_unknown_returns_one() {
     // Regression: previously this silently degenerated to `all`, hiding
     // typos in CI configs. The unknown name must now fail loudly.
-    let names = vec!["build".to_string(), "serve".to_string()];
+    let names: Vec<Option<String>> =
+      vec![Some("build".into()), Some("serve".into())];
     let exit_codes = codes(&[(0, 0), (1, 0)]);
     assert_eq!(
       SuccessCondition::NotCommandName("typo".to_string())
