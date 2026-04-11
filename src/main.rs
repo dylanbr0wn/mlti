@@ -98,6 +98,10 @@ pub struct Commands {
   /// success condition: all, first, last, command-{{index|name}}, !command-{{index|name}}
   #[argh(option, short = 's', default = "default_success()")]
   success: String,
+
+  /// print a duration summary for each process after completion
+  #[argh(switch)]
+  timings: bool,
 }
 
 #[derive(Clone)]
@@ -113,6 +117,7 @@ pub struct MltiConfig {
   pub no_color: bool,
   pub group: bool,
   pub timestamp_format: String,
+  pub timings: bool,
 }
 
 pub struct CommandParser {
@@ -141,6 +146,7 @@ impl CommandParser {
         raw: commands.raw,
         no_color: commands.no_color,
         timestamp_format: commands.timestamp_format,
+        timings: commands.timings,
       },
     })
   }
@@ -516,6 +522,51 @@ async fn main() -> Result<()> {
 
   let exit_codes = scheduler.get_exit_codes().await;
   let exit_code = arg_parser.evaluate_exit_code(&exit_codes);
+
+  if mlti_config.timings {
+    let mut timings = scheduler.get_timings().await;
+    let total_processes = arg_parser.len();
+    timings.sort_by_key(|t| t.index);
+    print_message(
+      SenderType::Main,
+      "".into(),
+      "\nTimings:".into(),
+      bold_green_style,
+      mlti_config.raw,
+      mlti_config.no_color,
+    );
+    for t in &timings {
+      let style = if t.exit_code != 0 {
+        red_style
+      } else {
+        bold_green_style
+      };
+      print_message(
+        SenderType::Main,
+        "".into(),
+        format!(
+          "  [{}] {} \u{2014} {:.2}s",
+          t.index, t.raw_cmd, t.duration_secs
+        ),
+        style,
+        mlti_config.raw,
+        mlti_config.no_color,
+      );
+    }
+    if timings.len() < total_processes {
+      print_message(
+        SenderType::Main,
+        "".into(),
+        format!(
+          "  ({} process(es) killed before completion)",
+          total_processes - timings.len()
+        ),
+        red_style,
+        mlti_config.raw,
+        mlti_config.no_color,
+      );
+    }
+  }
 
   print_message(
     SenderType::Main,
