@@ -98,6 +98,14 @@ pub struct Commands {
   /// success condition: all, first, last, command-{{index|name}}, !command-{{index|name}}
   #[argh(option, short = 's', default = "default_success()")]
   success: String,
+
+  /// enable stdin forwarding to child processes
+  #[argh(switch, short = 'i')]
+  handle_input: bool,
+
+  /// set which process receives input by default (name or index). Implies --handle-input.
+  #[argh(option)]
+  default_input_target: Option<String>,
 }
 
 #[derive(Clone)]
@@ -113,21 +121,25 @@ pub struct MltiConfig {
   pub no_color: bool,
   pub group: bool,
   pub timestamp_format: String,
+  pub handle_input: bool,
 }
 
 pub struct CommandParser {
   pub names: Vec<String>,
   pub processes: Vec<String>,
   pub mlti_config: MltiConfig,
+  pub default_input_target: Option<String>,
   success_condition: SuccessCondition,
 }
 
 impl CommandParser {
   pub fn new(commands: Commands) -> Result<Self, String> {
     let success_condition = SuccessCondition::parse(&commands.success)?;
+    let handle_input = commands.handle_input || commands.default_input_target.is_some();
     Ok(Self {
       names: parse_names(commands.names, commands.names_seperator),
       processes: commands.processes,
+      default_input_target: commands.default_input_target,
       success_condition,
       mlti_config: MltiConfig {
         group: commands.group,
@@ -141,6 +153,7 @@ impl CommandParser {
         raw: commands.raw,
         no_color: commands.no_color,
         timestamp_format: commands.timestamp_format,
+        handle_input,
       },
     })
   }
