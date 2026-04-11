@@ -88,6 +88,71 @@ impl InputRouter {
             .cloned()
             .unwrap_or_else(|| index.to_string())
     }
+
+    pub async fn register(&self, index: usize, stdin: ChildStdin) {
+        self.handles.lock().await.insert(index, stdin);
+    }
+
+    pub async fn deregister(&self, index: usize) {
+        self.handles.lock().await.remove(&index);
+    }
+
+    pub async fn route(&self, line: &str) {
+        let parsed = self.parse_line(line);
+        let mut handles = self.handles.lock().await;
+
+        if handles.is_empty() {
+            self.send_message("[mlti] No running processes, input discarded".to_string());
+            return;
+        }
+
+        match handles.get_mut(&parsed.target) {
+            Some(stdin) => {
+                let data = format!("{}\n", parsed.payload);
+                if let Err(_) = stdin.write_all(data.as_bytes()).await {
+                    // Process died between lookup and write
+                    drop(handles);
+                    self.deregister(parsed.target).await;
+                    self.send_message(format!(
+                        "[mlti] Failed to send input to \"{}\" (process exited)",
+                        parsed.target_name
+                    ));
+                    return;
+                }
+                if let Err(_) = stdin.flush().await {
+                    drop(handles);
+                    self.deregister(parsed.target).await;
+                    self.send_message(format!(
+                        "[mlti] Failed to send input to \"{}\" (process exited)",
+                        parsed.target_name
+                    ));
+                    return;
+                }
+                self.send_message(format!(
+                    "[mlti] -> {}: {}",
+                    parsed.target_name, parsed.payload
+                ));
+            }
+            None => {
+                self.send_message(format!(
+                    "[mlti] Unknown target \"{}\", input discarded",
+                    parsed.target_name
+                ));
+            }
+        }
+    }
+
+    fn send_message(&self, data: String) {
+        self.message_tx
+            .send(Message::new(
+                MessageType::Text,
+                Some("".to_string()),
+                Some(data),
+                None,
+                build_message_sender(SenderType::Main, None, None),
+            ))
+            .expect("Could not send message on channel.");
+    }
 }
 
 #[cfg(test)]
@@ -219,5 +284,18 @@ mod tests {
         let router = make_router(vec![], 2, 0);
         assert_eq!(router.display_name(0), "0");
         assert_eq!(router.display_name(1), "1");
+    }
+
+    #[tokio::test]
+    async fn register_and_deregister() {
+        let router = make_router(vec!["server"], 1, 0);
+        // Initially empty
+        assert!(router.handles.lock().await.is_empty());
+
+        // We can't easily create a real ChildStdin in a test, but we can
+        // verify the map operations work by checking the handles map size
+        // after deregister of a non-existent key (no panic).
+        router.deregister(0).await;
+        assert!(router.handles.lock().await.is_empty());
     }
 }
