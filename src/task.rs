@@ -55,7 +55,7 @@ impl Task {
     let mut restart_attempts = self.mlti_config.restart_tries - 1;
 
     loop {
-      let attempt_child = self.process.run();
+      let attempt_child = self.process.run(self.mlti_config.handle_input);
       match attempt_child {
         Ok(c) => {
           child = Some(c);
