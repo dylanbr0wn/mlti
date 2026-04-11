@@ -721,7 +721,8 @@ mod tests {
     assert_eq!(processes[0].name, "api     ");
     assert_eq!(processes[1].name, "frontend");
     assert_eq!(processes[2].name, "db      ");
-    let widths: Vec<usize> = processes.iter().map(|p| p.name.chars().count()).collect();
+    let widths: Vec<usize> =
+      processes.iter().map(|p| p.name.chars().count()).collect();
     assert!(widths.windows(2).all(|w| w[0] == w[1]));
   }
 
@@ -754,10 +755,7 @@ mod tests {
 
   #[test]
   fn pad_process_names_unicode_chars() {
-    let mut processes = vec![
-      make_process("café"),
-      make_process("db"),
-    ];
+    let mut processes = vec![make_process("café"), make_process("db")];
     pad_process_names(&mut processes);
     assert_eq!(processes[0].name, "café");
     assert_eq!(processes[1].name, "db  ");
