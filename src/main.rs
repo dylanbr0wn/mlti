@@ -10,13 +10,17 @@ use anyhow::Result;
 use argh::FromArgs;
 use task::Task;
 
-use crate::{input_router::InputRouter, message::SenderType, messenger::print_message};
+use crate::{
+  input_router::{resolve_target, InputRouter},
+  message::SenderType,
+  messenger::print_message,
+};
 
 mod command;
+mod input_router;
 mod message;
 mod messenger;
 mod scheduler;
-mod input_router;
 mod task;
 
 fn default_restart_tries() -> i64 {
@@ -139,7 +143,8 @@ pub struct CommandParser {
 impl CommandParser {
   pub fn new(commands: Commands) -> Result<Self, String> {
     let success_condition = SuccessCondition::parse(&commands.success)?;
-    let handle_input = commands.handle_input || commands.default_input_target.is_some();
+    let handle_input =
+      commands.handle_input || commands.default_input_target.is_some();
     Ok(Self {
       names: parse_names(commands.names, commands.names_seperator),
       processes: commands.processes,
@@ -294,23 +299,16 @@ fn resolve_default_target(
 ) -> usize {
   match target {
     None => 0,
-    Some(t) => {
-      // Try name match first
-      if let Some(idx) = names.iter().position(|n| n == t) {
-        return idx;
+    Some(t) => match resolve_target(t, names, num_processes) {
+      Some(idx) => idx,
+      None => {
+        eprintln!(
+          "Error: --default-input-target \"{}\" does not match any process name or index",
+          t
+        );
+        std::process::exit(1);
       }
-      // Fall back to index
-      if let Ok(idx) = t.parse::<usize>() {
-        if idx < num_processes {
-          return idx;
-        }
-      }
-      eprintln!(
-        "Error: --default-input-target \"{}\" does not match any process name or index",
-        t
-      );
-      std::process::exit(1);
-    }
+    },
   }
 }
 
@@ -472,6 +470,12 @@ async fn main() -> Result<()> {
       .expect("Could not send task on channel.");
   }
 
+  // `tokio::io::stdin()` uses a blocking helper thread on Unix. Calling
+  // `abort()` on the spawned task wakes the future but the underlying
+  // `read(2)` stays parked in the kernel until the next byte or EOF.
+  // In practice, interactive users may need to press Enter once after
+  // all processes exit before mlti returns. This is a known tokio
+  // limitation (tokio-rs/tokio#2466) and is acceptable for our use.
   let stdin_reader_handle = if let Some(ref router) = input_router {
     let router = router.clone();
     Some(tokio::spawn(async move {
