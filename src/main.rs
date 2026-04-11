@@ -420,6 +420,7 @@ async fn main() -> Result<()> {
         message_tx.clone(),
         shutdown_tx.clone(),
         mlti_config.to_owned(),
+        None, // input_router — wired in Task 7
       ))
       .await
       .expect("Could not send task on channel.");

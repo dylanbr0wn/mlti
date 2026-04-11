@@ -7,14 +7,17 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
 use crate::command::Process;
+use crate::input_router::InputRouter;
 use crate::message::{build_message_sender, Message, MessageType, SenderType};
 use crate::MltiConfig;
+use std::sync::Arc;
 
 pub(crate) struct Task {
   process: Process,
   message_tx: Sender<Message>,
   shutdown_tx: Sender<Message>,
   mlti_config: MltiConfig,
+  input_router: Option<Arc<InputRouter>>,
   exit_code: Option<i32>,
 }
 
@@ -24,12 +27,14 @@ impl Task {
     message_tx: Sender<Message>,
     shutdown_tx: Sender<Message>,
     mlti_config: MltiConfig,
+    input_router: Option<Arc<InputRouter>>,
   ) -> Self {
     Self {
       process,
       message_tx,
       shutdown_tx,
       mlti_config,
+      input_router,
       exit_code: None,
     }
   }
@@ -124,6 +129,13 @@ impl Task {
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
 
+    // Register stdin with the input router if enabled
+    if let Some(ref router) = self.input_router {
+      if let Some(stdin) = child.stdin.take() {
+        router.register(self.process.index, stdin).await;
+      }
+    }
+
     let handle = tokio::spawn(async move {
       child
         .wait()
@@ -191,6 +203,10 @@ impl Task {
     let status = handle.await.unwrap();
     let code = status.code().unwrap_or(-1);
     self.exit_code = Some(code);
+    // Deregister stdin from the input router
+    if let Some(ref router) = self.input_router {
+      router.deregister(self.process.index).await;
+    }
     self
       .message_tx
       .send_async(Message::new(
