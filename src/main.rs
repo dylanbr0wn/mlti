@@ -13,6 +13,7 @@ mod command;
 mod message;
 mod messenger;
 mod scheduler;
+mod input_router;
 mod task;
 
 fn default_restart_tries() -> i64 {
