@@ -141,6 +141,68 @@ struct PackageJson {
     scripts: HashMap<String, String>,
 }
 
+/// Expand wildcard patterns in process commands.
+/// Returns expanded (processes, names) vectors.
+/// Names are `Some(name)` for explicitly named or auto-named positions,
+/// `None` for positions with no name.
+pub fn expand_commands(
+    processes: Vec<String>,
+    names: Vec<String>,
+    manifest_path: Option<String>,
+) -> Result<(Vec<String>, Vec<Option<String>>)> {
+    let has_wildcards = processes.iter().any(|p| parse_wildcard(p).is_some());
+
+    let scripts = if has_wildcards {
+        Some(read_manifest(manifest_path.as_deref())?)
+    } else {
+        None
+    };
+
+    let mut expanded_processes = Vec::new();
+    let mut expanded_names: Vec<Option<String>> = Vec::new();
+    let mut name_idx = 0;
+
+    for process in &processes {
+        if let Some(pattern) = parse_wildcard(process) {
+            let scripts = scripts.as_ref().unwrap();
+            let matches = match_scripts(&pattern, scripts)?;
+
+            if matches.is_empty() {
+                eprintln!(
+                    "Warning: pattern '{}' matched no scripts, skipping",
+                    process
+                );
+                if name_idx < names.len() {
+                    name_idx += 1;
+                }
+                continue;
+            }
+
+            for m in &matches {
+                let name = if name_idx < names.len() {
+                    Some(names[name_idx].clone())
+                } else {
+                    Some(m.auto_name.clone())
+                };
+                expanded_processes.push(m.command.clone());
+                expanded_names.push(name);
+                name_idx += 1;
+            }
+        } else {
+            expanded_processes.push(process.clone());
+            let name = if name_idx < names.len() {
+                Some(names[name_idx].clone())
+            } else {
+                None
+            };
+            expanded_names.push(name);
+            name_idx += 1;
+        }
+    }
+
+    Ok((expanded_processes, expanded_names))
+}
+
 /// Read and parse the scripts field from a package.json manifest file.
 fn read_manifest(manifest_path: Option<&str>) -> Result<HashMap<String, String>> {
     let path = manifest_path.unwrap_or("package.json");
@@ -154,6 +216,152 @@ fn read_manifest(manifest_path: Option<&str>) -> Result<HashMap<String, String>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_test_manifest(dir: &tempfile::TempDir) -> String {
+        let path = dir.path().join("package.json");
+        fs::write(
+            &path,
+            r#"{
+                "scripts": {
+                    "build:client": "webpack client",
+                    "build:server": "webpack server",
+                    "test:unit": "jest",
+                    "lint:js": "eslint .",
+                    "lint:ts": "tsc --noEmit",
+                    "lint:fix": "eslint --fix ."
+                }
+            }"#,
+        )
+        .unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn expand_no_wildcards_passthrough() {
+        let processes = vec!["echo hello".into(), "echo world".into()];
+        let names = vec!["a".into(), "b".into()];
+        let (procs, nms) = expand_commands(processes.clone(), names, None).unwrap();
+        assert_eq!(procs, processes);
+        assert_eq!(nms, vec![Some("a".into()), Some("b".into())]);
+    }
+
+    #[test]
+    fn expand_no_wildcards_fewer_names() {
+        let processes = vec!["echo a".into(), "echo b".into(), "echo c".into()];
+        let names = vec!["first".into()];
+        let (procs, nms) = expand_commands(processes.clone(), names, None).unwrap();
+        assert_eq!(procs, processes);
+        assert_eq!(nms, vec![Some("first".into()), None, None]);
+    }
+
+    #[test]
+    fn expand_wildcard_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = write_test_manifest(&dir);
+        let processes = vec!["npm:build:*".into()];
+        let names = vec![];
+        let (procs, nms) =
+            expand_commands(processes, names, Some(manifest)).unwrap();
+        assert_eq!(procs, vec![
+            "npm run build:client".to_string(),
+            "npm run build:server".to_string(),
+        ]);
+        assert_eq!(nms, vec![
+            Some("client".into()),
+            Some("server".into()),
+        ]);
+    }
+
+    #[test]
+    fn expand_mixed_wildcard_and_plain() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = write_test_manifest(&dir);
+        let processes = vec![
+            "node server.js".into(),
+            "npm:build:*".into(),
+        ];
+        let names = vec!["server".into()];
+        let (procs, nms) =
+            expand_commands(processes, names, Some(manifest)).unwrap();
+        assert_eq!(procs, vec![
+            "node server.js",
+            "npm run build:client",
+            "npm run build:server",
+        ]);
+        assert_eq!(nms, vec![
+            Some("server".into()),
+            Some("client".into()),
+            Some("server".into()),
+        ]);
+    }
+
+    #[test]
+    fn expand_explicit_names_override_auto() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = write_test_manifest(&dir);
+        let processes = vec!["npm:build:*".into()];
+        let names = vec!["custom1".into(), "custom2".into()];
+        let (procs, nms) =
+            expand_commands(processes, names, Some(manifest)).unwrap();
+        assert_eq!(procs.len(), 2);
+        assert_eq!(nms, vec![
+            Some("custom1".into()),
+            Some("custom2".into()),
+        ]);
+    }
+
+    #[test]
+    fn expand_wildcard_no_matches_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = write_test_manifest(&dir);
+        let processes = vec![
+            "echo hello".into(),
+            "npm:deploy:*".into(),
+        ];
+        let names = vec!["greeter".into()];
+        let (procs, nms) =
+            expand_commands(processes, names, Some(manifest)).unwrap();
+        // deploy:* matched nothing, so only the echo command remains
+        assert_eq!(procs, vec!["echo hello"]);
+        assert_eq!(nms, vec![Some("greeter".into())]);
+    }
+
+    #[test]
+    fn expand_wildcard_with_trailing_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = write_test_manifest(&dir);
+        let processes = vec!["npm:build:* --watch".into()];
+        let names = vec![];
+        let (procs, _) =
+            expand_commands(processes, names, Some(manifest)).unwrap();
+        assert_eq!(procs, vec![
+            "npm run build:client --watch",
+            "npm run build:server --watch",
+        ]);
+    }
+
+    #[test]
+    fn expand_plain_after_wildcard_no_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = write_test_manifest(&dir);
+        let processes = vec![
+            "npm:build:*".into(),
+            "echo done".into(),
+        ];
+        let names = vec![];
+        let (procs, nms) =
+            expand_commands(processes, names, Some(manifest)).unwrap();
+        assert_eq!(procs, vec![
+            "npm run build:client",
+            "npm run build:server",
+            "echo done",
+        ]);
+        assert_eq!(nms, vec![
+            Some("client".into()),
+            Some("server".into()),
+            None,
+        ]);
+    }
 
     fn test_scripts() -> HashMap<String, String> {
         HashMap::from([
