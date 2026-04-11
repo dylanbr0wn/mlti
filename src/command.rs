@@ -37,10 +37,13 @@ impl Process {
       raw_cmd: raw_cmd.clone(),
     }
   }
-  pub fn run(&self) -> Result<Child, std::io::Error> {
+  pub fn run(&self, handle_input: bool) -> Result<Child, std::io::Error> {
     let mut cmd = tokio::process::Command::new(self.cmd.clone());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    if handle_input {
+      cmd.stdin(Stdio::piped());
+    }
     cmd.args(self.args.clone());
 
     cmd.spawn()

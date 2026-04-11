@@ -1,16 +1,24 @@
+use std::sync::Arc;
+
 use command::Process;
 use message::{build_message_sender, Message, MessageType};
 use owo_colors::Style;
 use rand::Rng;
+use tokio::io::AsyncBufReadExt;
 
 use anyhow::Result;
 use argh::FromArgs;
 use task::Task;
 
-use crate::{message::SenderType, messenger::print_message};
+use crate::{
+  input_router::{resolve_target, InputRouter},
+  message::SenderType,
+  messenger::print_message,
+};
 
 mod command;
 mod command_expander;
+mod input_router;
 mod message;
 mod messenger;
 mod scheduler;
@@ -118,6 +126,14 @@ pub struct Commands {
   /// path to package.json for wildcard expansion
   #[argh(option)]
   manifest_path: Option<String>,
+
+  /// enable stdin forwarding to child processes
+  #[argh(switch, short = 'i')]
+  handle_input: bool,
+
+  /// set which process receives input by default (name or index). Implies --handle-input.
+  #[argh(option)]
+  default_input_target: Option<String>,
 }
 
 #[derive(Clone)]
@@ -136,6 +152,7 @@ pub struct MltiConfig {
   pub pad_prefix: bool,
   pub timings: bool,
   pub hide_list: Vec<HideTarget>,
+  pub handle_input: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,6 +178,7 @@ pub struct CommandParser {
   pub names: Vec<Option<String>>,
   pub processes: Vec<String>,
   pub mlti_config: MltiConfig,
+  pub default_input_target: Option<String>,
   success_condition: SuccessCondition,
 }
 
@@ -193,6 +211,8 @@ fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
 impl CommandParser {
   pub fn new(commands: Commands) -> Result<Self, String> {
     let success_condition = SuccessCondition::parse(&commands.success)?;
+    let handle_input =
+      commands.handle_input || commands.default_input_target.is_some();
 
     // For boolean switches: CLI true means explicitly set; otherwise fall back to env var.
     let kill_others =
@@ -258,6 +278,7 @@ impl CommandParser {
     Ok(Self {
       names: expanded_names,
       processes,
+      default_input_target: commands.default_input_target,
       success_condition,
       mlti_config: MltiConfig {
         group,
@@ -274,6 +295,7 @@ impl CommandParser {
         pad_prefix: commands.pad_prefix,
         timings: commands.timings,
         hide_list: parse_hide_list(commands.hide),
+        handle_input,
       },
     })
   }
@@ -437,6 +459,26 @@ pub fn parse_max_processes(max_processes: Option<String>) -> i32 {
   }
 }
 
+fn resolve_default_target(
+  target: &Option<String>,
+  names: &[Option<String>],
+  num_processes: usize,
+) -> usize {
+  match target {
+    None => 0,
+    Some(t) => match resolve_target(t, names, num_processes) {
+      Some(idx) => idx,
+      None => {
+        eprintln!(
+          "Error: --default-input-target \"{}\" does not match any process name or index",
+          t
+        );
+        std::process::exit(1);
+      }
+    },
+  }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
   let commands: Commands = argh::from_env();
@@ -533,6 +575,22 @@ async fn main() -> Result<()> {
     arg_parser.len() as i32,
   ));
 
+  let input_router: Option<Arc<InputRouter>> = if mlti_config.handle_input {
+    let default_target = resolve_default_target(
+      &arg_parser.default_input_target,
+      &arg_parser.names,
+      arg_parser.len(),
+    );
+    Some(Arc::new(InputRouter::new(
+      arg_parser.names.clone(),
+      arg_parser.len(),
+      default_target,
+      message_tx.clone(),
+    )))
+  } else {
+    None
+  };
+
   // let mut unnamed_counter = -1;
 
   let mut rng = rand::thread_rng();
@@ -576,10 +634,30 @@ async fn main() -> Result<()> {
         message_tx.clone(),
         shutdown_tx.clone(),
         mlti_config.to_owned(),
+        input_router.clone(),
       ))
       .await
       .expect("Could not send task on channel.");
   }
+
+  // `tokio::io::stdin()` uses a blocking helper thread on Unix. Calling
+  // `abort()` on the spawned task wakes the future but the underlying
+  // `read(2)` stays parked in the kernel until the next byte or EOF.
+  // In practice, interactive users may need to press Enter once after
+  // all processes exit before mlti returns. This is a known tokio
+  // limitation (tokio-rs/tokio#2466) and is acceptable for our use.
+  let stdin_reader_handle = if let Some(ref router) = input_router {
+    let router = router.clone();
+    Some(tokio::spawn(async move {
+      let stdin = tokio::io::stdin();
+      let mut reader = tokio::io::BufReader::new(stdin).lines();
+      while let Ok(Some(line)) = reader.next_line().await {
+        router.route(&line).await;
+      }
+    }))
+  } else {
+    None
+  };
 
   shutdown_messenger
     .listen(
@@ -681,6 +759,10 @@ async fn main() -> Result<()> {
       },
     )
     .await;
+  // Abort the stdin reader task if it's running
+  if let Some(handle) = stdin_reader_handle {
+    handle.abort();
+  }
   messenger_handle.await.ok();
   scheduler_handler.await.ok();
 

@@ -25,6 +25,8 @@ A comparison of [concurrently](https://github.com/open-cli-tools/concurrently) (
 | `npm:` shortcut | ✅ | ✅ | `npm:foo` → `npm run foo` |
 | `pnpm:` shortcut | ✅ | ✅ | `pnpm:foo` → `pnpm foo` (note: concurrently expands to `pnpm run`) |
 | Random prefix colors | ✅ | ✅ | MLTI uses random RGB; concurrently uses `auto` |
+| `--handle-input` / `-i` | ✅ | ✅ | Read from stdin and forward to a child process; support targeting by index or name |
+| `--default-input-target` | ✅ | ✅ | Set which process receives input by default |
 
 ---
 
@@ -61,10 +63,7 @@ A comparison of [concurrently](https://github.com/open-cli-tools/concurrently) (
 
 ### Input Handling
 
-| Feature | Difficulty | Description |
-|---------|:---:|-------------|
-| **`--handle-input` / `-i`** | 🔴 Hard | Read from stdin and forward to a child process. Support targeting by index (`0:input`) or name (`server:input`). Requires stdin multiplexing and writing to child stdin handles. |
-| **`--default-input-target`** | 🔴 Hard | Set which process receives input by default. Depends on `--handle-input`. |
+_All input handling features are now implemented._
 
 ### Command Shortcuts
 
@@ -124,4 +123,3 @@ If you want to chip away at parity, here's a reasonable order that balances impa
 7. **`--prefix-colors`** — replace random colors with user-controlled ones
 8. **`--kill-signal` / `--kill-timeout`** — proper process termination
 9. **`--passthrough-arguments`** — useful for npm script wrappers
-10. **`--handle-input`** — hardest feature, but completes the picture

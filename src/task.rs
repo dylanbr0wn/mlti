@@ -8,8 +8,10 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
 use crate::command::Process;
+use crate::input_router::InputRouter;
 use crate::message::{build_message_sender, Message, MessageType, SenderType};
 use crate::MltiConfig;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct TaskTiming {
@@ -24,6 +26,7 @@ pub(crate) struct Task {
   message_tx: Sender<Message>,
   shutdown_tx: Sender<Message>,
   mlti_config: MltiConfig,
+  input_router: Option<Arc<InputRouter>>,
   exit_code: Option<i32>,
 }
 
@@ -33,12 +36,14 @@ impl Task {
     message_tx: Sender<Message>,
     shutdown_tx: Sender<Message>,
     mlti_config: MltiConfig,
+    input_router: Option<Arc<InputRouter>>,
   ) -> Self {
     Self {
       process,
       message_tx,
       shutdown_tx,
       mlti_config,
+      input_router,
       exit_code: None,
     }
   }
@@ -77,9 +82,19 @@ impl Task {
     let mut restart_attempts = self.mlti_config.restart_tries - 1;
 
     loop {
-      let attempt_child = self.process.run();
+      // Deregister any previous stdin handle (no-op on first iteration)
+      if let Some(ref router) = self.input_router {
+        router.deregister(self.process.index).await;
+      }
+      let attempt_child = self.process.run(self.mlti_config.handle_input);
       match attempt_child {
-        Ok(c) => {
+        Ok(mut c) => {
+          // Register stdin with the input router if enabled
+          if let Some(ref router) = self.input_router {
+            if let Some(stdin) = c.stdin.take() {
+              router.register(self.process.index, stdin).await;
+            }
+          }
           child = Some(c);
           break;
         }
@@ -215,6 +230,10 @@ impl Task {
     let status = handle.await.unwrap();
     let code = status.code().unwrap_or(-1);
     self.exit_code = Some(code);
+    // Deregister stdin from the input router
+    if let Some(ref router) = self.input_router {
+      router.deregister(self.process.index).await;
+    }
     self
       .message_tx
       .send_async(Message::new(
