@@ -130,7 +130,26 @@ pub struct MltiConfig {
   pub timestamp_format: String,
   pub pad_prefix: bool,
   pub timings: bool,
-  pub hide_list: Vec<String>,
+  pub hide_list: Vec<HideTarget>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HideTarget {
+  Index(usize),
+  Name(String),
+}
+
+impl HideTarget {
+  pub fn matches(&self, index: Option<usize>, name: &str) -> bool {
+    match self {
+      HideTarget::Index(i) => index == Some(*i),
+      HideTarget::Name(n) => n == name,
+    }
+  }
+}
+
+pub fn is_hidden_by(list: &[HideTarget], index: Option<usize>, name: &str) -> bool {
+  list.iter().any(|t| t.matches(index, name))
 }
 
 pub struct CommandParser {
@@ -364,12 +383,16 @@ pub fn parse_names(names: Option<String>, seperator: String) -> Vec<String> {
   names
 }
 
-pub fn parse_hide_list(hide: Option<String>) -> Vec<String> {
+pub fn parse_hide_list(hide: Option<String>) -> Vec<HideTarget> {
   match hide {
     Some(h) => h
       .split(',')
-      .map(|s| s.trim().to_string())
+      .map(|s| s.trim())
       .filter(|s| !s.is_empty())
+      .map(|s| match s.parse::<usize>() {
+        Ok(i) => HideTarget::Index(i),
+        Err(_) => HideTarget::Name(s.to_string()),
+      })
       .collect(),
     None => vec![],
   }
@@ -426,14 +449,7 @@ async fn main() -> Result<()> {
       .listen(
         |message: Message, raw: bool, no_color: bool| match message.type_ {
           MessageType::Error | MessageType::Text => {
-            let hidden = if let Some(idx) = message.sender.index {
-              hide_list
-                .iter()
-                .any(|h| h == &idx.to_string() || h == &message.name)
-            } else {
-              false
-            };
-            if !hidden {
+            if !is_hidden_by(&hide_list, message.sender.index, &message.name) {
               print_message(
                 message.sender.type_,
                 message.name,
@@ -1099,5 +1115,99 @@ mod tests {
   #[test]
   fn default_timestamp_format_matches_expected() {
     assert_eq!(default_timestamp_format(), "%Y-%m-%d %H:%M:%S");
+  }
+
+  // ---- parse_hide_list / HideTarget / is_hidden_by ----
+
+  #[test]
+  fn parse_hide_list_none_is_empty() {
+    assert_eq!(parse_hide_list(None), Vec::<HideTarget>::new());
+  }
+
+  #[test]
+  fn parse_hide_list_empty_string_is_empty() {
+    assert_eq!(parse_hide_list(Some("".into())), Vec::<HideTarget>::new());
+  }
+
+  #[test]
+  fn parse_hide_list_whitespace_and_commas_is_empty() {
+    assert_eq!(
+      parse_hide_list(Some("  ,  ,".into())),
+      Vec::<HideTarget>::new()
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_single_index() {
+    assert_eq!(
+      parse_hide_list(Some("0".into())),
+      vec![HideTarget::Index(0)]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_single_name() {
+    assert_eq!(
+      parse_hide_list(Some("foo".into())),
+      vec![HideTarget::Name("foo".into())]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_mixed_indices_and_names() {
+    assert_eq!(
+      parse_hide_list(Some("0,foo,2".into())),
+      vec![
+        HideTarget::Index(0),
+        HideTarget::Name("foo".into()),
+        HideTarget::Index(2),
+      ]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_trims_whitespace() {
+    assert_eq!(
+      parse_hide_list(Some(" 0 , foo ".into())),
+      vec![HideTarget::Index(0), HideTarget::Name("foo".into())]
+    );
+  }
+
+  #[test]
+  fn parse_hide_list_trailing_comma_ignored() {
+    assert_eq!(
+      parse_hide_list(Some("0,foo,".into())),
+      vec![HideTarget::Index(0), HideTarget::Name("foo".into())]
+    );
+  }
+
+  #[test]
+  fn hide_target_index_matches_only_by_index() {
+    let t = HideTarget::Index(1);
+    assert!(t.matches(Some(1), "anything"));
+    assert!(!t.matches(Some(0), "anything"));
+    assert!(!t.matches(None, "anything"));
+  }
+
+  #[test]
+  fn hide_target_name_matches_only_by_name() {
+    let t = HideTarget::Name("build".into());
+    assert!(t.matches(Some(5), "build"));
+    assert!(t.matches(None, "build"));
+    assert!(!t.matches(Some(5), "serve"));
+  }
+
+  #[test]
+  fn is_hidden_by_empty_list_hides_nothing() {
+    assert!(!is_hidden_by(&[], Some(0), "foo"));
+  }
+
+  #[test]
+  fn is_hidden_by_matches_any_entry() {
+    let list = vec![HideTarget::Index(0), HideTarget::Name("foo".into())];
+    assert!(is_hidden_by(&list, Some(0), "bar"));
+    assert!(is_hidden_by(&list, Some(2), "foo"));
+    assert!(!is_hidden_by(&list, Some(2), "bar"));
+    assert!(!is_hidden_by(&list, None, "bar"));
   }
 }

@@ -3,6 +3,7 @@ use owo_colors::{OwoColorize, Style};
 use std::collections::VecDeque;
 
 use crate::message::{Message, MessageType, SenderType};
+use crate::{is_hidden_by, HideTarget};
 
 pub struct Messenger {
   sender: Sender<Message>,
@@ -11,7 +12,7 @@ pub struct Messenger {
   no_color: bool,
   group: bool,
   message_queue: Vec<VecDeque<Message>>,
-  hide_list: Vec<String>,
+  hide_list: Vec<HideTarget>,
 }
 
 impl Messenger {
@@ -20,7 +21,7 @@ impl Messenger {
     no_color: bool,
     num_commands: usize,
     group: bool,
-    hide_list: Vec<String>,
+    hide_list: Vec<HideTarget>,
   ) -> Self {
     let (sender, receiver) = flume::unbounded::<Message>();
 
@@ -79,13 +80,7 @@ impl Messenger {
   pub fn flush(&mut self) {
     for queue in self.message_queue.iter_mut() {
       while let Some(message) = queue.pop_front() {
-        if self.hide_list.iter().any(|h| {
-          message
-            .sender
-            .index
-            .is_some_and(|idx| h == &idx.to_string())
-            || h == &message.name
-        }) {
+        if is_hidden_by(&self.hide_list, message.sender.index, &message.name) {
           continue;
         }
         print_message(
